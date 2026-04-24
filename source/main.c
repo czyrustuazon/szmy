@@ -1,6 +1,7 @@
 #include <3ds.h>
 #include <stdio.h>
 #include "audio.h"
+#include "topbg.h"
 
 /* Bottom screen touch zones: left half and right half of the bottom area */
 #define BOTTOM_W    320
@@ -16,6 +17,11 @@ int main(int argc, char* argv[])
     gfxInitDefault();
     consoleInit(GFX_TOP, &topScreen);
     consoleInit(GFX_BOTTOM, &bottomScreen);
+
+    /* Full-screen top background (RGB565); must run after consoleInit so the top uses RGB565. */
+    if (topbg_init() == 0)
+        topbg_blit_to_top(&topScreen);
+
     consoleSelect(&topScreen);
 
     /* Draw something on bottom so emulator (if it shows bottom) isn't blank */

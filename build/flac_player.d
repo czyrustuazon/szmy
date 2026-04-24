@@ -1,5 +1,5 @@
-flac_player.o: C:/Users/Zepse/Documents/Mp3_Player/source/flac_player.c \
- C:/Users/Zepse/Documents/Mp3_Player/include/dr_flac.h \
+flac_player.o: C:/Users/Zepse/Documents/szmy/source/flac_player.c \
+ C:/Users/Zepse/Documents/szmy/include/dr_flac.h \
  C:/devkitPro/libctru/include/3ds.h \
  C:/devkitPro/libctru/include/3ds/types.h \
  C:/devkitPro/libctru/include/3ds/result.h \
@@ -87,8 +87,8 @@ flac_player.o: C:/Users/Zepse/Documents/Mp3_Player/source/flac_player.c \
  C:/devkitPro/libctru/include/3ds/font.h \
  C:/devkitPro/libctru/include/3ds/gdbhio_dev.h \
  C:/devkitPro/libctru/include/3ds/3dslink.h \
- C:/Users/Zepse/Documents/Mp3_Player/include/audio.h
-C:/Users/Zepse/Documents/Mp3_Player/include/dr_flac.h:
+ C:/Users/Zepse/Documents/szmy/include/audio.h
+C:/Users/Zepse/Documents/szmy/include/dr_flac.h:
 C:/devkitPro/libctru/include/3ds.h:
 C:/devkitPro/libctru/include/3ds/types.h:
 C:/devkitPro/libctru/include/3ds/result.h:
@@ -176,4 +176,4 @@ C:/devkitPro/libctru/include/3ds/romfs.h:
 C:/devkitPro/libctru/include/3ds/font.h:
 C:/devkitPro/libctru/include/3ds/gdbhio_dev.h:
 C:/devkitPro/libctru/include/3ds/3dslink.h:
-C:/Users/Zepse/Documents/Mp3_Player/include/audio.h:
+C:/Users/Zepse/Documents/szmy/include/audio.h:

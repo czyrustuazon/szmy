@@ -8,9 +8,14 @@ endif
 
 TOPDIR ?= $(CURDIR)
 include $(DEVKITARM)/3ds_rules
+# 3ds_rules (and base_rules) add pattern targets first; without this, `make` does not
+# run our `all` and never builds the .3dsx.
+.DEFAULT_GOAL := all
 
 #---------------------------------------------------------------------------------
-# TARGET is the name of the output
+# TARGET is the base name of output files (e.g. szmy.3dsx) in the project root.
+# When the sub-make runs in build/, notdir(CURDIR) is "build" — do not set TARGET=build.
+# Optional override: TARGET := Mp3_Player
 # BUILD is the directory where object files & intermediate files will be placed
 # SOURCES is a list of directories containing source code
 # DATA is a list of directories containing data files
@@ -23,7 +28,13 @@ include $(DEVKITARM)/3ds_rules
 # APP_AUTHOR is the author of the app stored in the SMDH file (Optional)
 # ICON is the filename of the icon (.png), relative to the project folder.
 #---------------------------------------------------------------------------------
-TARGET := $(notdir $(CURDIR))
+# Derive app basename: .../myproj (TARGET=myproj) or .../myproj/build in sub-make (still myproj, not "build")
+__HERE := $(notdir $(CURDIR))
+ifeq ($(__HERE),build)
+TARGET := $(notdir $(patsubst %/build,%,$(abspath .)))
+else
+TARGET := $(__HERE)
+endif
 BUILD := build
 SOURCES := source
 DATA := data
@@ -77,6 +88,10 @@ endif
 #---------------------------------------------------------------------------------
 # list of directories containing libraries
 #---------------------------------------------------------------------------------
+# CIA (installable to Home Menu): `make cia` — not part of the default `make` / `all` target.
+# makerom needs an RSF. Prefer $(TARGET).rsf; if you only have a copy from an old name (e.g. Mp3_Player), we fall back. Override: CIA_RSF := myapp.rsf
+#---------------------------------------------------------------------------------
+CIA_RSF ?= $(if $(wildcard $(TARGET).rsf),$(TARGET).rsf,$(if $(wildcard Mp3_Player.rsf),Mp3_Player.rsf,$(TARGET).rsf))
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
@@ -125,7 +140,9 @@ export OFILES_BIN := $(addsuffix .o,$(BINFILES)) \
 	$(PICAFILES:.v.pica=.shbin.o) $(SHLISTFILES:.shlist=.shbin.o) \
 	$(addsuffix .o,$(T3XFILES))
 
-export OFILES := $(OFILES_BIN) $(OFILES_SOURCES)
+# top_screen_bg.bmp is embedded with bin2o (separate from DATA binfiles; avoids HFILES on generated .h)
+export GFX_EMBED      := top_screen_bg.bmp.o
+export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES) $(GFX_EMBED)
 
 export HFILES := $(PICAFILES:.v.pica=_shbin.h) $(SHLISTFILES:.shlist=_shbin.h) \
 	$(addsuffix .h,$(subst .,_,$(BINFILES))) \
@@ -154,11 +171,12 @@ else
 endif
 
 ifeq ($(strip $(NO_SMDH)),)
-	export _3DSXFLAGS += --smdh=$(CURDIR)/$(TARGET).smdh
+	# smdh in project root; do not use CURDIR (wrong when sub-make runs from build/)
+	export _3DSXFLAGS += --smdh=$(TOPDIR)/$(TARGET).smdh
 endif
 
 ifneq ($(ROMFS),)
-	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
+	export _3DSXFLAGS += --romfs=$(TOPDIR)/$(ROMFS)
 endif
 
 .PHONY: all clean cia
@@ -169,15 +187,15 @@ $(VGMSTREAM_LIB):
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES) $(VGMSTREAM_LIB)
-	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
 # CIA target: build installable .cia (install and launch from Home Menu for New3DS extended RAM)
 # Requires: makerom in PATH (e.g. from devkitPro buildtools or 3dstools)
 #---------------------------------------------------------------------------------
 cia: all
-	@echo building $(TARGET).cia ...
-	@makerom -f cia -o $(TARGET).cia -rsf $(TARGET).rsf -target t -elf $(TARGET).elf -icon $(TARGET).smdh
+	@echo building $(TARGET).cia with RSF: $(CIA_RSF)
+	@makerom -f cia -o $(TARGET).cia -rsf $(CIA_RSF) -target t -elf $(TARGET).elf -icon $(TARGET).smdh
 	@echo built ... $(TARGET).cia
 
 $(BUILD):
@@ -210,6 +228,10 @@ $(GFXBUILD)/%.t3x $(BUILD)/%.h : %.t3s
 #---------------------------------------------------------------------------------
 else
 
+# When make runs with cwd=build/, the default goal is not reliably $(OUTPUT).3dsx; `make all` fixes that.
+.PHONY: all
+all: $(OUTPUT).3dsx
+
 #---------------------------------------------------------------------------------
 # main targets
 #---------------------------------------------------------------------------------
@@ -218,6 +240,15 @@ $(OUTPUT).3dsx : $(OUTPUT).elf $(_3DSXDEPS)
 $(OFILES_SOURCES) : $(HFILES)
 
 $(OUTPUT).elf : $(OFILES)
+
+#---------------------------------------------------------------------------------
+# Embedded .bmp: bin2o writes top_screen_bg_bmp.h + top_screen_bg.bmp.o in $(BUILD)
+#---------------------------------------------------------------------------------
+top_screen_bg.bmp.o: top_screen_bg.bmp
+	@echo $(notdir $<)
+	@$(bin2o)
+
+topbg.o: top_screen_bg.bmp.o
 
 #---------------------------------------------------------------------------------
 %.bin.o %_bin.h : %.bin

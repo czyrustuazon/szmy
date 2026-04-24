@@ -1,4 +1,4 @@
-main.o: C:/Users/Zepse/Documents/Mp3_Player/source/main.c \
+main.o: C:/Users/Zepse/Documents/szmy/source/main.c \
  C:/devkitPro/libctru/include/3ds.h \
  C:/devkitPro/libctru/include/3ds/types.h \
  C:/devkitPro/libctru/include/3ds/result.h \
@@ -86,7 +86,8 @@ main.o: C:/Users/Zepse/Documents/Mp3_Player/source/main.c \
  C:/devkitPro/libctru/include/3ds/font.h \
  C:/devkitPro/libctru/include/3ds/gdbhio_dev.h \
  C:/devkitPro/libctru/include/3ds/3dslink.h \
- C:/Users/Zepse/Documents/Mp3_Player/include/audio.h
+ C:/Users/Zepse/Documents/szmy/include/audio.h \
+ C:/Users/Zepse/Documents/szmy/include/topbg.h
 C:/devkitPro/libctru/include/3ds.h:
 C:/devkitPro/libctru/include/3ds/types.h:
 C:/devkitPro/libctru/include/3ds/result.h:
@@ -174,4 +175,5 @@ C:/devkitPro/libctru/include/3ds/romfs.h:
 C:/devkitPro/libctru/include/3ds/font.h:
 C:/devkitPro/libctru/include/3ds/gdbhio_dev.h:
 C:/devkitPro/libctru/include/3ds/3dslink.h:
-C:/Users/Zepse/Documents/Mp3_Player/include/audio.h:
+C:/Users/Zepse/Documents/szmy/include/audio.h:
+C:/Users/Zepse/Documents/szmy/include/topbg.h:

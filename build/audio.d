@@ -1,4 +1,4 @@
-audio.o: C:/Users/Zepse/Documents/Mp3_Player/source/audio.c \
+audio.o: C:/Users/Zepse/Documents/szmy/source/audio.c \
  C:/devkitPro/libctru/include/3ds.h \
  C:/devkitPro/libctru/include/3ds/types.h \
  C:/devkitPro/libctru/include/3ds/result.h \
@@ -86,10 +86,10 @@ audio.o: C:/Users/Zepse/Documents/Mp3_Player/source/audio.c \
  C:/devkitPro/libctru/include/3ds/font.h \
  C:/devkitPro/libctru/include/3ds/gdbhio_dev.h \
  C:/devkitPro/libctru/include/3ds/3dslink.h \
- C:/Users/Zepse/Documents/Mp3_Player/include/audio.h \
- C:/Users/Zepse/Documents/Mp3_Player/vgmstream-master/src/libvgmstream.h \
- C:/Users/Zepse/Documents/Mp3_Player/vgmstream-master/src/libvgmstream_streamfile.h \
- C:/Users/Zepse/Documents/Mp3_Player/vgmstream-master/src/libvgmstream.h
+ C:/Users/Zepse/Documents/szmy/include/audio.h \
+ C:/Users/Zepse/Documents/szmy/vgmstream-master/src/libvgmstream.h \
+ C:/Users/Zepse/Documents/szmy/vgmstream-master/src/libvgmstream_streamfile.h \
+ C:/Users/Zepse/Documents/szmy/vgmstream-master/src/libvgmstream.h
 C:/devkitPro/libctru/include/3ds.h:
 C:/devkitPro/libctru/include/3ds/types.h:
 C:/devkitPro/libctru/include/3ds/result.h:
@@ -177,7 +177,7 @@ C:/devkitPro/libctru/include/3ds/romfs.h:
 C:/devkitPro/libctru/include/3ds/font.h:
 C:/devkitPro/libctru/include/3ds/gdbhio_dev.h:
 C:/devkitPro/libctru/include/3ds/3dslink.h:
-C:/Users/Zepse/Documents/Mp3_Player/include/audio.h:
-C:/Users/Zepse/Documents/Mp3_Player/vgmstream-master/src/libvgmstream.h:
-C:/Users/Zepse/Documents/Mp3_Player/vgmstream-master/src/libvgmstream_streamfile.h:
-C:/Users/Zepse/Documents/Mp3_Player/vgmstream-master/src/libvgmstream.h:
+C:/Users/Zepse/Documents/szmy/include/audio.h:
+C:/Users/Zepse/Documents/szmy/vgmstream-master/src/libvgmstream.h:
+C:/Users/Zepse/Documents/szmy/vgmstream-master/src/libvgmstream_streamfile.h:
+C:/Users/Zepse/Documents/szmy/vgmstream-master/src/libvgmstream.h:
