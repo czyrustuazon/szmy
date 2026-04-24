@@ -87,7 +87,7 @@ topbg.o: C:/Users/Zepse/Documents/szmy/source/topbg.c \
  C:/devkitPro/libctru/include/3ds/font.h \
  C:/devkitPro/libctru/include/3ds/gdbhio_dev.h \
  C:/devkitPro/libctru/include/3ds/3dslink.h \
- C:/Users/Zepse/Documents/szmy/build/top_screen_bg_bmp.h
+ C:/Users/Zepse/Documents/szmy/build/top_screen_bg_embed_bmp.h
 C:/Users/Zepse/Documents/szmy/include/topbg.h:
 C:/devkitPro/libctru/include/3ds/console.h:
 C:/devkitPro/libctru/include/3ds/types.h:
@@ -176,4 +176,4 @@ C:/devkitPro/libctru/include/3ds/romfs.h:
 C:/devkitPro/libctru/include/3ds/font.h:
 C:/devkitPro/libctru/include/3ds/gdbhio_dev.h:
 C:/devkitPro/libctru/include/3ds/3dslink.h:
-C:/Users/Zepse/Documents/szmy/build/top_screen_bg_bmp.h:
+C:/Users/Zepse/Documents/szmy/build/top_screen_bg_embed_bmp.h:

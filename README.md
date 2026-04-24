@@ -1,4 +1,4 @@
-# 3DS Homebrew – MP3 / Multi-format Audio Player
+# 3DS Homebrew – szmy (multi-format audio)
 
 A Nintendo 3DS homebrew app using **devkitPro**, **libctru**, and **vgmstream** for multi-format audio playback.  
 Supports **WAV, BRSTM, ADPCM, and many other formats** via vgmstream (no optional codec libs; built-in decoders only).  
@@ -20,10 +20,10 @@ Press **A** to play `sdmc:/music.wav` (or any supported file at that path); **ST
    make
    ```
 
-3. Output:
-   - `Mp3_Player.3dsx` – homebrew executable (run via 3DS homebrew launcher)
-   - `Mp3_Player.smdh` – icon/metadata
-   - `Mp3_Player.elf` – ELF for debugging
+3. Output (names match the project folder / `TARGET`, e.g. **szmy**):
+   - `szmy.3dsx` – homebrew executable (run via 3DS homebrew launcher)
+   - `szmy.smdh` – icon/metadata
+   - `szmy.elf` – ELF for debugging
 
 ## Build CIA (installable, more RAM on New 3DS)
 
@@ -36,13 +36,13 @@ To build an installable `.cia` (e.g. for **~124 MB** RAM on New 3DS when launche
    ```bash
    make cia
    ```
-3. You get `Mp3_Player.cia`. Install it with FBI or similar, then **launch from the Home Menu** (not from the homebrew launcher) to use the extended memory.
+3. You get `szmy.cia` (if the project folder is `szmy`). Install it with FBI or similar, then **launch from the Home Menu** (not from the homebrew launcher) to use the extended memory.
 
-The project includes `Mp3_Player.rsf` with **New3DS SystemModeExt: 124MB**. To request **178 MB** instead, edit the RSF and set `SystemModeExt : 178MB`.
+Add **`szmy.rsf`** in the project root (Rom Specification) with **New3DS SystemModeExt: 124MB** (or your choice). For **178 MB** instead, edit the RSF and set `SystemModeExt : 178MB`.
 
 ## Run on 3DS
 
-- Copy `Mp3_Player.3dsx` (and optionally `Mp3_Player.smdh` in the same folder) to your SD card, e.g. in `sd:/3ds/`.
+- Copy `szmy.3dsx` (and optionally `szmy.smdh` in the same folder) to your SD card, e.g. in `sd:/3ds/`.
 - Launch from the homebrew launcher (e.g. Luma3DS + Homebrew Menu).
 
 ## Clean
@@ -68,7 +68,7 @@ make clean
 - `data/` – binary data (included in the build)
 - `gfx/` – graphics (e.g. `.t3s` textures)
 - `Makefile` – devkitPro 3DS build rules (builds vgmstream then the app)
-- `Mp3_Player.rsf` – Rom Specification File for `make cia` (New3DS extended memory)
+- `szmy.rsf` – Rom Specification File for `make cia` (add yourself; New3DS extended memory when configured there)
 
 ## New 3DS: why only ~128 MB?
 
@@ -87,7 +87,7 @@ To get a **larger** app memory region (still not 256 MB):
    - **Prod (1):** ~124 MB for your app  
    - **Dev1 (2):** ~178 MB for your app  
    See [NCCH/Extended Header](https://www.3dbrew.org/wiki/NCCH/Extended_Header) (Flag2, New3DS system mode).
-This project includes a **`cia`** target and **`Mp3_Player.rsf`** with New3DS mode; run **`make cia`** (see Build CIA above).
+The **`make cia`** target uses `szmy.rsf` (i.e. `$(TARGET).rsf`) and New3DS settings from that file (see Build CIA above).
 
 So: **from 3dsx launched by hbmenu you cannot “force” access to the rest of the 256 MB**; the only way to get more is to run as a CIA from the Home Menu with an exheader that requests a larger New3DS memory mode.
 

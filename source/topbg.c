@@ -3,7 +3,7 @@
 #include <3ds/services/gspgpu.h>
 #include <3ds.h>
 #include <string.h>
-#include "top_screen_bg_bmp.h"
+#include "top_screen_bg_embed_bmp.h"
 
 /* Top: 400x240 logical; libctru framebuffer is 240*400, RGB565, per console.c indexing. */
 #define TOP_LOG_W 400
@@ -41,8 +41,8 @@ static void bmp_bgr32_at(
 }
 
 int topbg_init(void) {
-    const u8 *data = top_screen_bg_bmp;
-    size_t      z    = top_screen_bg_bmp_size;
+    const u8 *data = top_screen_bg_embed_bmp;
+    size_t      z    = top_screen_bg_embed_bmp_size;
 
     if (z < 54u) {
         s_ok = 0;
@@ -98,7 +98,7 @@ void topbg_blit_to_top(PrintConsole *top) {
     if (!fb)
         return;
 
-    const u8 *data = top_screen_bg_bmp;
+    const u8 *data = top_screen_bg_embed_bmp;
     u32      off_bits  = u32le(data + 10);
     u32      width     = u32le(data + 18);
     s32      iheight   = (s32)u32le(data + 22);

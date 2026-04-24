@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "audio.h"
 #include "topbg.h"
+#include "topfont.h"
 
 /* Bottom screen touch zones: left half and right half of the bottom area */
 #define BOTTOM_W    320
@@ -21,6 +22,9 @@ int main(int argc, char* argv[])
     /* Full-screen top background (RGB565); must run after consoleInit so the top uses RGB565. */
     if (topbg_init() == 0)
         topbg_blit_to_top(&topScreen);
+
+    /* Text draws only glyph pixels; top background shows through (see topfont.c). */
+    topfont_enable_transparent_bg(&topScreen);
 
     consoleSelect(&topScreen);
 

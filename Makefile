@@ -15,7 +15,7 @@ include $(DEVKITARM)/3ds_rules
 #---------------------------------------------------------------------------------
 # TARGET is the base name of output files (e.g. szmy.3dsx) in the project root.
 # When the sub-make runs in build/, notdir(CURDIR) is "build" — do not set TARGET=build.
-# Optional override: TARGET := Mp3_Player
+# Optional override: TARGET := myname  (else defaults to the project folder name, e.g. szmy)
 # BUILD is the directory where object files & intermediate files will be placed
 # SOURCES is a list of directories containing source code
 # DATA is a list of directories containing data files
@@ -88,10 +88,11 @@ endif
 #---------------------------------------------------------------------------------
 # list of directories containing libraries
 #---------------------------------------------------------------------------------
-# CIA (installable to Home Menu): `make cia` — not part of the default `make` / `all` target.
-# makerom needs an RSF. Prefer $(TARGET).rsf; if you only have a copy from an old name (e.g. Mp3_Player), we fall back. Override: CIA_RSF := myapp.rsf
+# CIA: `make cia` — not part of default `all`. makerom needs exactly $(TARGET).rsf (e.g. szmy.rsf).
+# Override: CIA_RSF := path/to/title.rsf
+# Keep UniqueId and memory settings in that file stable so Home Menu / installs don’t desync.
 #---------------------------------------------------------------------------------
-CIA_RSF ?= $(if $(wildcard $(TARGET).rsf),$(TARGET).rsf,$(if $(wildcard Mp3_Player.rsf),Mp3_Player.rsf,$(TARGET).rsf))
+CIA_RSF ?= $(TARGET).rsf
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
@@ -105,7 +106,8 @@ export TOPDIR := $(CURDIR)
 
 export VPATH := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
 	$(foreach dir,$(GRAPHICS),$(CURDIR)/$(dir)) \
-	$(foreach dir,$(DATA),$(CURDIR)/$(dir))
+	$(foreach dir,$(DATA),$(CURDIR)/$(dir)) \
+	$(CURDIR)/$(BUILD)
 
 export DEPSDIR := $(CURDIR)/$(BUILD)
 
@@ -140,8 +142,8 @@ export OFILES_BIN := $(addsuffix .o,$(BINFILES)) \
 	$(PICAFILES:.v.pica=.shbin.o) $(SHLISTFILES:.shlist=.shbin.o) \
 	$(addsuffix .o,$(T3XFILES))
 
-# top_screen_bg.bmp is embedded with bin2o (separate from DATA binfiles; avoids HFILES on generated .h)
-export GFX_EMBED      := top_screen_bg.bmp.o
+# Embedded top BG: 400x240 rescaled in build/ (keeps .cia small). Source: gfx/top_screen_bg.bmp
+export GFX_EMBED      := top_screen_bg_embed.bmp.o
 export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES) $(GFX_EMBED)
 
 export HFILES := $(PICAFILES:.v.pica=_shbin.h) $(SHLISTFILES:.shlist=_shbin.h) \
@@ -181,12 +183,34 @@ endif
 
 .PHONY: all clean cia
 
+# 400x240 = top blit size; re-encode 24-bit BMP. Install: https://imagemagick.org/ (magick/convert in PATH) or: choco install imagemagick
+TOP_BG_SRC    := $(CURDIR)/gfx/top_screen_bg.bmp
+TOP_BG_EMBED  := $(CURDIR)/$(BUILD)/top_screen_bg_embed.bmp
+
+$(TOP_BG_EMBED): $(TOP_BG_SRC) | $(BUILD)
+	@echo top_screen_bg: build embed 400x240 for smaller binary ...
+	@out="$(TOP_BG_EMBED)"; \
+	if command -v magick >/dev/null 2>&1; then \
+		magick "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
+			|| magick "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP:$$out" 2>/dev/null \
+			|| magick "$<" -strip -resize 400x240\! "$$out"; \
+		echo "  (ImageMagick -> $$out)"; \
+	elif command -v convert >/dev/null 2>&1; then \
+		convert "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
+			|| convert "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP:$$out" 2>/dev/null \
+			|| convert "$<" -strip -resize 400x240\! "$$out"; \
+		echo "  (ImageMagick -> $$out)"; \
+	else \
+		echo "  (no magick/convert: copying full gfx/top_screen_bg.bmp — install ImageMagick to reduce .cia/rom size)" >&2; \
+		cp -f "$<" "$$out"; \
+	fi
+
 #---------------------------------------------------------------------------------
 $(VGMSTREAM_LIB):
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds PORTLIBS_3DS="$(PORTLIBS_3DS)" ENABLE_MP3="$(ENABLE_MP3)"
 
 #---------------------------------------------------------------------------------
-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES) $(VGMSTREAM_LIB)
+all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES) $(VGMSTREAM_LIB) $(TOP_BG_EMBED)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
@@ -194,9 +218,15 @@ all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES) $(VGMSTREAM_
 # Requires: makerom in PATH (e.g. from devkitPro buildtools or 3dstools)
 #---------------------------------------------------------------------------------
 cia: all
-	@echo building $(TARGET).cia with RSF: $(CIA_RSF)
-	@makerom -f cia -o $(TARGET).cia -rsf $(CIA_RSF) -target t -elf $(TARGET).elf -icon $(TARGET).smdh
-	@echo built ... $(TARGET).cia
+	@echo building $(OUTPUT).cia
+	@echo "  RSF:  $(CIA_RSF)"
+	@echo "  elf:  $(OUTPUT).elf"
+	@echo "  icon: $(OUTPUT).smdh"
+	@test -f "$(CIA_RSF)" || ( echo "Error: RSF not found: $(CIA_RSF). Add it or set CIA_RSF=..." ; exit 1 )
+	@test -f "$(OUTPUT).elf" || ( echo "Error: no ELF. Run 'make' first." ; exit 1 )
+	@test -f "$(OUTPUT).smdh" || ( echo "Error: missing $(OUTPUT).smdh (run make without NO_SMDH, add icon)."; exit 1 )
+	@makerom -f cia -o $(OUTPUT).cia -rsf $(CIA_RSF) -target t -elf $(OUTPUT).elf -icon $(OUTPUT).smdh
+	@echo built: $(OUTPUT).cia
 
 $(BUILD):
 	@mkdir -p $@
@@ -214,7 +244,7 @@ endif
 #---------------------------------------------------------------------------------
 clean: clean-vgmstream
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(TARGET).cia $(GFXBUILD)
+	@rm -fr $(BUILD) $(OUTPUT).3dsx $(OUTPUT).smdh $(OUTPUT).elf $(OUTPUT).cia $(GFXBUILD)
 
 clean-vgmstream:
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds clean 2>/dev/null || true
@@ -242,13 +272,13 @@ $(OFILES_SOURCES) : $(HFILES)
 $(OUTPUT).elf : $(OFILES)
 
 #---------------------------------------------------------------------------------
-# Embedded .bmp: bin2o writes top_screen_bg_bmp.h + top_screen_bg.bmp.o in $(BUILD)
+# Embedded .bmp: bin2o writes top_screen_bg_embed_bmp.h + .o in $(BUILD)
 #---------------------------------------------------------------------------------
-top_screen_bg.bmp.o: top_screen_bg.bmp
+top_screen_bg_embed.bmp.o: top_screen_bg_embed.bmp
 	@echo $(notdir $<)
 	@$(bin2o)
 
-topbg.o: top_screen_bg.bmp.o
+topbg.o: top_screen_bg_embed.bmp.o
 
 #---------------------------------------------------------------------------------
 %.bin.o %_bin.h : %.bin
