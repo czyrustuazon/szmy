@@ -73,18 +73,18 @@ int jptext_init(void)
         goto fail;
     }
 
-    /* Upload bg texture before C2D allocates large vertex buffers. */
-    if (topbg_init(1) != 0) {
-        s_init_error = 7;
-        goto fail;
-    }
-
     if (!C2D_Init(C2D_DEFAULT_MAX_OBJECTS)) {
         s_init_error = 3;
         goto fail;
     }
 
     C2D_Prepare();
+
+    /* Swizzled .t3x background (tex3ds); must be after C3D/C2D init. */
+    if (topbg_init(1) != 0) {
+        s_init_error = 7;
+        goto fail;
+    }
 
     s_top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
     if (!s_top) {

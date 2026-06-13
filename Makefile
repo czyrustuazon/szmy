@@ -261,7 +261,7 @@ $(VGMSTREAM_LIB):
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds PORTLIBS_3DS="$(PORTLIBS_3DS)" ENABLE_MP3="$(ENABLE_MP3)"
 
 #---------------------------------------------------------------------------------
-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES) $(VGMSTREAM_LIB) $(TOP_BG_EMBED) $(BTN_BMPS)
+all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
@@ -301,6 +301,10 @@ clean-vgmstream:
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds clean 2>/dev/null || true
 
 #---------------------------------------------------------------------------------
+$(GFXBUILD)/top_screen_bg.t3x $(BUILD)/top_screen_bg.h : $(CURDIR)/gfx/top_screen_bg.t3s $(TOP_BG_EMBED)
+	@echo $(notdir $<)
+	@tex3ds -i $< -H $(BUILD)/top_screen_bg.h -d $(DEPSDIR)/top_screen_bg.d -o $(GFXBUILD)/top_screen_bg.t3x
+
 $(GFXBUILD)/%.t3x $(BUILD)/%.h : %.t3s
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
@@ -329,7 +333,7 @@ top_screen_bg_embed.bmp.o: top_screen_bg_embed.bmp
 	@echo $(notdir $<)
 	@$(bin2o)
 
-topbg.o: top_screen_bg_embed.bmp.o
+topbg.o: top_screen_bg_embed.bmp.o top_screen_bg.t3x.o
 
 #---------------------------------------------------------------------------------
 play_active.bmp.o: play_active.bmp
