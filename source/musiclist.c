@@ -56,19 +56,39 @@ static int entry_is_dir(const char *path, const struct dirent *ent)
     return S_ISDIR(st.st_mode);
 }
 
-static int name_at_kind_cmp(const void *a, const void *b)
-{
-    int ia = *(const int *)a;
-    int ib = *(const int *)b;
-    if (s_kinds[ia] != s_kinds[ib])
-        return (int)s_kinds[ia] - (int)s_kinds[ib];
-    return strcasecmp(s_names[ia], s_names[ib]);
-}
-
 static void clear_list(void)
 {
     s_count    = 0;
     s_selected = 0;
+}
+
+static void sort_entries(void)
+{
+    for (int i = 0; i < s_count - 1; i++) {
+        for (int j = i + 1; j < s_count; j++) {
+            int cmp;
+            if (s_kinds[i] != s_kinds[j])
+                cmp = (int)s_kinds[i] - (int)s_kinds[j];
+            else
+                cmp = strcasecmp(s_names[i], s_names[j]);
+            if (cmp <= 0)
+                continue;
+
+            EntryKind tk = s_kinds[i];
+            s_kinds[i] = s_kinds[j];
+            s_kinds[j] = tk;
+
+            char tmp[MUSIC_NAME_MAX];
+            memcpy(tmp, s_names[i], MUSIC_NAME_MAX);
+            memcpy(s_names[i], s_names[j], MUSIC_NAME_MAX);
+            memcpy(s_names[j], tmp, MUSIC_NAME_MAX);
+
+            char tpath[MUSIC_PATH_MAX];
+            memcpy(tpath, s_paths[i], MUSIC_PATH_MAX);
+            memcpy(s_paths[i], s_paths[j], MUSIC_PATH_MAX);
+            memcpy(s_paths[j], tpath, MUSIC_PATH_MAX);
+        }
+    }
 }
 
 static int scan_cwd(void)
@@ -87,10 +107,17 @@ static int scan_cwd(void)
         char full[MUSIC_PATH_MAX];
         snprintf(full, sizeof(full), "%s/%.200s", s_cwd, ent->d_name);
 
-        if (entry_is_dir(full, ent)) {
+        if (ent->d_type == DT_DIR) {
             s_kinds[s_count] = ENTRY_DIR;
-        } else if (is_audio_ext(ent->d_name)) {
+        } else if (ent->d_type == DT_REG && is_audio_ext(ent->d_name)) {
             s_kinds[s_count] = ENTRY_FILE;
+        } else if (ent->d_type == DT_UNKNOWN) {
+            if (entry_is_dir(full, ent))
+                s_kinds[s_count] = ENTRY_DIR;
+            else if (is_audio_ext(ent->d_name))
+                s_kinds[s_count] = ENTRY_FILE;
+            else
+                continue;
         } else {
             continue;
         }
@@ -102,25 +129,8 @@ static int scan_cwd(void)
     }
     closedir(dir);
 
-    if (s_count > 1) {
-        int order[MUSICLIST_MAX];
-        for (int i = 0; i < s_count; i++)
-            order[i] = i;
-        qsort(order, (size_t)s_count, sizeof(order[0]), name_at_kind_cmp);
-
-        char      names[MUSICLIST_MAX][MUSIC_NAME_MAX];
-        char      paths[MUSICLIST_MAX][MUSIC_PATH_MAX];
-        EntryKind kinds[MUSICLIST_MAX];
-        for (int i = 0; i < s_count; i++) {
-            int j = order[i];
-            memcpy(names[i], s_names[j], MUSIC_NAME_MAX);
-            memcpy(paths[i], s_paths[j], MUSIC_PATH_MAX);
-            kinds[i] = s_kinds[j];
-        }
-        memcpy(s_names, names, sizeof(names));
-        memcpy(s_paths, paths, sizeof(paths));
-        memcpy(s_kinds, kinds, sizeof(kinds));
-    }
+    if (s_count > 1)
+        sort_entries();
 
     return 0;
 }
