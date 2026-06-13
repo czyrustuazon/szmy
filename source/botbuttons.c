@@ -1,5 +1,6 @@
 #include "botbuttons.h"
 #include "audio.h"
+#include "musiclist.h"
 #include <3ds/gfx.h>
 #include <3ds.h>
 #include <string.h>
@@ -269,7 +270,9 @@ void botbuttons_frame(PrintConsole *bottom) {
         if (point_in(
                 s_last_x, s_last_y, s_pdx0, s_pdy0, (int)(s_paw > s_piw ? s_paw : s_piw), (int)(s_pah > s_pih ? s_pah : s_pih))
             && !audio_is_playing()) {
-            (void)audio_play_file_async("sdmc:/music.wav");
+            const char *path = musiclist_selected_path();
+            if (path != NULL && !musiclist_selected_is_dir())
+                (void)audio_play_file_async(path);
         } else if (point_in(
                      s_last_x, s_last_y, s_sdx0, s_sdy0, (int)(s_saw > s_siw ? s_saw : s_siw), (int)(s_sah > s_sih ? s_sah : s_sih))
                  && audio_is_playing()) {

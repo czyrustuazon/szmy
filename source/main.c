@@ -1,9 +1,11 @@
 #include <3ds.h>
 #include <stdio.h>
+#include <string.h>
 #include "audio.h"
 #include "topbg.h"
 #include "topfont.h"
 #include "botbuttons.h"
+#include "musiclist.h"
 
 int main(int argc, char *argv[])
 {
@@ -25,29 +27,22 @@ int main(int argc, char *argv[])
 
     botbuttons_init(&bottomScreen);
 
-    consoleSelect(&topScreen);
-
-    u32 total = osGetMemRegionSize(MEMREGION_APPLICATION);
-    u32 used  = osGetMemRegionUsed(MEMREGION_APPLICATION);
-    u32 free  = osGetMemRegionFree(MEMREGION_APPLICATION);
-
-    int counter = 0;
-    int prev_counter = -999999; /* force first redraw */
-
-    printf("\x1b[1;1HHello World!");
-    printf("\x1b[3;1H--- Application RAM (your process) ---");
-    printf("\x1b[4;1H  Total: %lu MB", (unsigned long)(total / (1024 * 1024)));
-    printf("\x1b[5;1H  Used:  %lu MB", (unsigned long)(used / (1024 * 1024)));
-    printf("\x1b[6;1H  Free:  %lu MB", (unsigned long)(free / (1024 * 1024)));
-    printf("\x1b[8;1HPress START to exit.");
-    printf(
-        "\x1b[10;1HDPad Left/Right = counter. Lower strip: play (left) & pause (right), touch to press.");
-    printf("\x1b[11;1HA=play  B=stop  Pause=hold position (bottom right)");
-
     if (audio_init() != 0)
-        printf("\x1b[12;1HAudio init failed (DSP firmware?).");
+        printf("\x1b[22;1HAudio init failed (DSP firmware?).");
+
+    if (musiclist_init() != 0)
+        printf("\x1b[22;1HCould not open " MUSIC_DIR_FS);
+
+    int list_dirty = 1;
+    int prev_selected = -1;
+    int prev_playing = -1;
+    int prev_paused = -1;
+    char prev_cwd[MUSIC_PATH_MAX];
+    strncpy(prev_cwd, musiclist_cwd(), MUSIC_PATH_MAX - 1);
+    prev_cwd[MUSIC_PATH_MAX - 1] = '\0';
 
     /* First frame: bottom bar + top text */
+    musiclist_draw(&topScreen, audio_is_playing(), audio_is_paused());
     botbuttons_frame(&bottomScreen);
     gfxFlushBuffers();
     gfxSwapBuffers();
@@ -60,26 +55,43 @@ int main(int argc, char *argv[])
         u32 kDown = hidKeysDown();
         if (kDown & KEY_START)
             break;
+
+        if (kDown & KEY_DUP) {
+            musiclist_select_prev();
+            list_dirty = 1;
+        }
+        if (kDown & KEY_DDOWN) {
+            musiclist_select_next();
+            list_dirty = 1;
+        }
         if (kDown & KEY_A) {
-            int r = audio_play_file_async("sdmc:/music.wav");
-            printf(
-                "\x1b[12;1HPlay: %d (0=ok, -6=busy) %s",
-                r,
-                audio_is_playing() ? "[playing]" : (audio_is_paused() ? "[paused]" : "        "));
+            if (musiclist_selected_is_dir())
+                musiclist_enter();
+            else {
+                const char *path = musiclist_selected_path();
+                if (path != NULL)
+                    (void)audio_play_file_async(path);
+            }
+            list_dirty = 1;
         }
         if (kDown & KEY_B) {
-            audio_stop();
-            if (!audio_is_playing() && !audio_is_paused())
-                printf("\x1b[12;1HStopped.                    ");
+            musiclist_go_back();
+            list_dirty = 1;
         }
-        if (kDown & KEY_DLEFT)
-            counter--;
-        if (kDown & KEY_DRIGHT)
-            counter++;
 
-        if (counter != prev_counter) {
-            printf("\x1b[2;1H  Counter: %d    ", counter);
-            prev_counter = counter;
+        int playing = audio_is_playing();
+        int paused  = audio_is_paused();
+        int selected = musiclist_get_selected();
+        const char *cwd = musiclist_cwd();
+        int cwd_changed = strcmp(cwd, prev_cwd) != 0;
+        if (list_dirty || selected != prev_selected || playing != prev_playing || paused != prev_paused || cwd_changed) {
+            musiclist_draw(&topScreen, playing, paused);
+            prev_selected = selected;
+            prev_playing  = playing;
+            prev_paused   = paused;
+            list_dirty    = 0;
+            strncpy(prev_cwd, cwd, MUSIC_PATH_MAX - 1);
+            prev_cwd[MUSIC_PATH_MAX - 1] = '\0';
         }
 
         /* Touch → active; release → inactive. Play/pause strip + line colors (see audio.c) */
@@ -90,6 +102,7 @@ int main(int argc, char *argv[])
         gspWaitForVBlank();
     }
 
+    musiclist_exit();
     audio_exit();
     gfxExit();
     return 0;

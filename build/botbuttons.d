@@ -88,6 +88,7 @@ botbuttons.o: C:/Users/Zepse/Documents/szmy/source/botbuttons.c \
  C:/devkitPro/libctru/include/3ds/gdbhio_dev.h \
  C:/devkitPro/libctru/include/3ds/3dslink.h \
  C:/Users/Zepse/Documents/szmy/include/audio.h \
+ C:/Users/Zepse/Documents/szmy/include/musiclist.h \
  C:/Users/Zepse/Documents/szmy/build/play_active_bmp.h \
  C:/Users/Zepse/Documents/szmy/build/play_inactive_bmp.h \
  C:/Users/Zepse/Documents/szmy/build/pause_active_bmp.h \
@@ -181,6 +182,7 @@ C:/devkitPro/libctru/include/3ds/font.h:
 C:/devkitPro/libctru/include/3ds/gdbhio_dev.h:
 C:/devkitPro/libctru/include/3ds/3dslink.h:
 C:/Users/Zepse/Documents/szmy/include/audio.h:
+C:/Users/Zepse/Documents/szmy/include/musiclist.h:
 C:/Users/Zepse/Documents/szmy/build/play_active_bmp.h:
 C:/Users/Zepse/Documents/szmy/build/play_inactive_bmp.h:
 C:/Users/Zepse/Documents/szmy/build/pause_active_bmp.h:
