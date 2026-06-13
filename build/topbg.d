@@ -1,10 +1,7 @@
 topbg.o: C:/Users/Zepse/Documents/szmy/source/topbg.c \
  C:/Users/Zepse/Documents/szmy/include/topbg.h \
- C:/devkitPro/libctru/include/3ds/console.h \
- C:/devkitPro/libctru/include/3ds/types.h \
- C:/devkitPro/libctru/include/3ds/gfx.h \
- C:/devkitPro/libctru/include/3ds/services/gspgpu.h \
  C:/devkitPro/libctru/include/3ds.h \
+ C:/devkitPro/libctru/include/3ds/types.h \
  C:/devkitPro/libctru/include/3ds/result.h \
  C:/devkitPro/libctru/include/3ds/ipc.h \
  C:/devkitPro/libctru/include/3ds/svc.h \
@@ -14,6 +11,9 @@ topbg.o: C:/Users/Zepse/Documents/szmy/source/topbg.c \
  C:/devkitPro/libctru/include/3ds/os.h \
  C:/devkitPro/libctru/include/3ds/synchronization.h \
  C:/devkitPro/libctru/include/3ds/thread.h \
+ C:/devkitPro/libctru/include/3ds/gfx.h \
+ C:/devkitPro/libctru/include/3ds/services/gspgpu.h \
+ C:/devkitPro/libctru/include/3ds/console.h \
  C:/devkitPro/libctru/include/3ds/env.h \
  C:/devkitPro/libctru/include/3ds/util/decompress.h \
  C:/devkitPro/libctru/include/3ds/util/utf.h \
@@ -87,13 +87,34 @@ topbg.o: C:/Users/Zepse/Documents/szmy/source/topbg.c \
  C:/devkitPro/libctru/include/3ds/font.h \
  C:/devkitPro/libctru/include/3ds/gdbhio_dev.h \
  C:/devkitPro/libctru/include/3ds/3dslink.h \
+ C:/devkitPro/libctru/include/citro2d.h \
+ C:/devkitPro/libctru/include/citro3d.h \
+ C:/devkitPro/libctru/include/c3d/types.h \
+ C:/devkitPro/libctru/include/c3d/maths.h \
+ C:/devkitPro/libctru/include/c3d/mtxstack.h \
+ C:/devkitPro/libctru/include/c3d/uniforms.h \
+ C:/devkitPro/libctru/include/c3d/attribs.h \
+ C:/devkitPro/libctru/include/c3d/buffers.h \
+ C:/devkitPro/libctru/include/c3d/base.h \
+ C:/devkitPro/libctru/include/c3d/texenv.h \
+ C:/devkitPro/libctru/include/c3d/effect.h \
+ C:/devkitPro/libctru/include/c3d/texture.h \
+ C:/devkitPro/libctru/include/c3d/proctex.h \
+ C:/devkitPro/libctru/include/c3d/light.h \
+ C:/devkitPro/libctru/include/c3d/lightlut.h \
+ C:/devkitPro/libctru/include/c3d/fog.h \
+ C:/devkitPro/libctru/include/c3d/framebuffer.h \
+ C:/devkitPro/libctru/include/c3d/renderqueue.h \
+ C:/devkitPro/libctru/include/tex3ds.h \
+ C:/devkitPro/libctru/include/c2d/base.h \
+ C:/devkitPro/libctru/include/c2d/spritesheet.h \
+ C:/devkitPro/libctru/include/c2d/sprite.h \
+ C:/devkitPro/libctru/include/c2d/text.h \
+ C:/devkitPro/libctru/include/c2d/font.h \
  C:/Users/Zepse/Documents/szmy/build/top_screen_bg_embed_bmp.h
 C:/Users/Zepse/Documents/szmy/include/topbg.h:
-C:/devkitPro/libctru/include/3ds/console.h:
-C:/devkitPro/libctru/include/3ds/types.h:
-C:/devkitPro/libctru/include/3ds/gfx.h:
-C:/devkitPro/libctru/include/3ds/services/gspgpu.h:
 C:/devkitPro/libctru/include/3ds.h:
+C:/devkitPro/libctru/include/3ds/types.h:
 C:/devkitPro/libctru/include/3ds/result.h:
 C:/devkitPro/libctru/include/3ds/ipc.h:
 C:/devkitPro/libctru/include/3ds/svc.h:
@@ -103,6 +124,9 @@ C:/devkitPro/libctru/include/3ds/errf.h:
 C:/devkitPro/libctru/include/3ds/os.h:
 C:/devkitPro/libctru/include/3ds/synchronization.h:
 C:/devkitPro/libctru/include/3ds/thread.h:
+C:/devkitPro/libctru/include/3ds/gfx.h:
+C:/devkitPro/libctru/include/3ds/services/gspgpu.h:
+C:/devkitPro/libctru/include/3ds/console.h:
 C:/devkitPro/libctru/include/3ds/env.h:
 C:/devkitPro/libctru/include/3ds/util/decompress.h:
 C:/devkitPro/libctru/include/3ds/util/utf.h:
@@ -176,4 +200,28 @@ C:/devkitPro/libctru/include/3ds/romfs.h:
 C:/devkitPro/libctru/include/3ds/font.h:
 C:/devkitPro/libctru/include/3ds/gdbhio_dev.h:
 C:/devkitPro/libctru/include/3ds/3dslink.h:
+C:/devkitPro/libctru/include/citro2d.h:
+C:/devkitPro/libctru/include/citro3d.h:
+C:/devkitPro/libctru/include/c3d/types.h:
+C:/devkitPro/libctru/include/c3d/maths.h:
+C:/devkitPro/libctru/include/c3d/mtxstack.h:
+C:/devkitPro/libctru/include/c3d/uniforms.h:
+C:/devkitPro/libctru/include/c3d/attribs.h:
+C:/devkitPro/libctru/include/c3d/buffers.h:
+C:/devkitPro/libctru/include/c3d/base.h:
+C:/devkitPro/libctru/include/c3d/texenv.h:
+C:/devkitPro/libctru/include/c3d/effect.h:
+C:/devkitPro/libctru/include/c3d/texture.h:
+C:/devkitPro/libctru/include/c3d/proctex.h:
+C:/devkitPro/libctru/include/c3d/light.h:
+C:/devkitPro/libctru/include/c3d/lightlut.h:
+C:/devkitPro/libctru/include/c3d/fog.h:
+C:/devkitPro/libctru/include/c3d/framebuffer.h:
+C:/devkitPro/libctru/include/c3d/renderqueue.h:
+C:/devkitPro/libctru/include/tex3ds.h:
+C:/devkitPro/libctru/include/c2d/base.h:
+C:/devkitPro/libctru/include/c2d/spritesheet.h:
+C:/devkitPro/libctru/include/c2d/sprite.h:
+C:/devkitPro/libctru/include/c2d/text.h:
+C:/devkitPro/libctru/include/c2d/font.h:
 C:/Users/Zepse/Documents/szmy/build/top_screen_bg_embed_bmp.h:

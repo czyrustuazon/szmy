@@ -23,6 +23,44 @@ static bool g_paused = false;
 static bool g_have_resume = false;
 static char g_play_path[256];
 static int64_t g_resume_sample = 0;
+static volatile int g_last_play_error = 0;
+
+const char *audio_error_message(int error)
+{
+    switch (error) {
+    case 0:
+        return NULL;
+    case -1:
+        return "Cannot open file";
+    case -2:
+        return "Cannot read audio stream";
+    case -3:
+        return "Unsupported format";
+    case -4:
+        return "Unsupported channels/sample rate";
+    case -5:
+        return "Out of memory";
+    case -7:
+        return "Could not start playback";
+    default:
+        return "Playback failed";
+    }
+}
+
+int audio_last_play_error(void)
+{
+    return g_last_play_error;
+}
+
+static void set_play_error(int error)
+{
+    g_last_play_error = error;
+}
+
+static void clear_play_error(void)
+{
+    g_last_play_error = 0;
+}
 
 static void wait_playback_idle(void)
 {
@@ -69,13 +107,6 @@ void audio_pause(void)
     g_pause_requested = true;
 }
 
-void audio_resume(void)
-{
-    if (!g_paused || g_playing)
-        return;
-    (void)audio_play_file_async(g_play_path);
-}
-
 int audio_should_stop(void)
 {
     return g_stop_requested;
@@ -109,33 +140,26 @@ int audio_end_is_pause(void)
 
 static void playback_thread_func(void *arg)
 {
+    int result;
+
     (void)arg;
     g_playing = true;
     g_stop_requested = false;
     g_pause_requested = false;
-    audio_play_file(g_play_path);
+    result = audio_play_file(g_play_path);
+    if (result != 0 && !g_stop_requested)
+        set_play_error(result);
+    else if (result == 0 && !g_paused)
+        clear_play_error();
     if (!g_paused)
         g_have_resume = false;
     g_playing = false;
 }
 
-int audio_play_file_async(const char *path)
+static int start_playback_thread(int keep_resume)
 {
-    if (!g_audio_initialized)
-        return -1;
-    if (g_playing)
-        return -6;
-
-    if (g_paused) {
-        /* Resume: keep g_have_resume + g_resume_sample from pause. */
-        g_paused = false;
-    } else {
-        if (!path)
-            return -1;
-        strncpy(g_play_path, path, sizeof(g_play_path) - 1);
-        g_play_path[sizeof(g_play_path) - 1] = '\0';
+    if (!keep_resume)
         g_have_resume = false;
-    }
 
     g_stop_requested = false;
     g_pause_requested = false;
@@ -143,6 +167,37 @@ int audio_play_file_async(const char *path)
     if (!threadCreate(playback_thread_func, NULL, 0x8000, 0x30, -1, true))
         return -7;
     return 0;
+}
+
+void audio_resume(void)
+{
+    if (!g_paused || g_playing)
+        return;
+    g_paused = false;
+    (void)start_playback_thread(1);
+}
+
+int audio_play_file_async(const char *path)
+{
+    int r;
+
+    if (!g_audio_initialized || !path) {
+        set_play_error(-1);
+        return -1;
+    }
+
+    if (g_playing)
+        wait_playback_idle();
+
+    clear_play_error();
+    g_paused = false;
+    strncpy(g_play_path, path, sizeof(g_play_path) - 1);
+    g_play_path[sizeof(g_play_path) - 1] = '\0';
+
+    r = start_playback_thread(0);
+    if (r != 0)
+        set_play_error(r);
+    return r;
 }
 
 int audio_is_playing(void)

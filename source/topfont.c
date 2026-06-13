@@ -130,7 +130,6 @@ static void topfont_clear_line_k2(PrintConsole *pc) {
         pc->cursorX++;
     }
     pc->cursorX = colTemp;
-    gfxFlushBuffers();
 }
 
 /* Same as libctru newRow(), with scroll + clear; uses PrintConsole* instead of currentConsole. */

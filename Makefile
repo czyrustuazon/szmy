@@ -78,11 +78,11 @@ PORTLIBS_3DS := $(DEVKITPRO)/portlibs/3ds
 MPG123_LIB   := $(PORTLIBS_3DS)/lib/libmpg123.a
 ifneq ($(wildcard $(MPG123_LIB)),)
   LIBDIRS := $(CTRULIB) $(PORTLIBS_3DS)
-  LIBS := -lvgmstream -lmpg123 -lctru -lm
+  LIBS := -lvgmstream -lmpg123 -lcitro2d -lcitro3d -lctru -lm
   ENABLE_MP3 := 1
 else
   LIBDIRS := $(CTRULIB)
-  LIBS := -lvgmstream -lctru -lm
+  LIBS := -lvgmstream -lcitro2d -lcitro3d -lctru -lm
 endif
 
 #---------------------------------------------------------------------------------

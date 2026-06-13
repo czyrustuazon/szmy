@@ -28,6 +28,12 @@ const char *musiclist_selected_path(void);
 /* Enter the selected folder. Returns 0 on success, negative on error. */
 int musiclist_enter(void);
 
+/* Path to play for the current selection, or NULL if a folder/nothing is selected. */
+const char *musiclist_play_path(void);
+
+/* Enter folder, or signal that a file is selected (0=file, 1=entered, -1=nothing). */
+int musiclist_activate(void);
+
 /* Go up one level (stops at MUSIC_DIR_FS). Returns 0 if moved, -1 at root. */
 int musiclist_go_back(void);
 

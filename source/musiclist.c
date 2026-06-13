@@ -1,4 +1,8 @@
 #include "musiclist.h"
+#include "topbg.h"
+#include "jptext.h"
+#include "audio.h"
+#include <citro2d.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,9 +13,16 @@
 #define MUSICLIST_MAX      128
 #define MUSIC_NAME_MAX     48
 
-#define LIST_ROW_FIRST  2
-#define LIST_ROW_LAST   19
-#define LIST_VISIBLE    (LIST_ROW_LAST - LIST_ROW_FIRST + 1)
+#define LIST_VISIBLE       14
+#define LINE_HEADER        0
+#define LINE_LIST0         1
+#define LINE_STATUS        (LINE_LIST0 + LIST_VISIBLE)
+#define LINE_HELP          (LINE_STATUS + 1)
+#define UI_BOTTOM_PX       ((int)((LINE_HELP + 1) * JPTEXT_LINE_H))
+
+#define CLR_NORMAL  C2D_Color32(0xE0, 0xE0, 0xE0, 0xFF)
+#define CLR_SELECT  C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF)
+#define CLR_ERROR   C2D_Color32(0xFF, 0xA0, 0xA0, 0xFF)
 
 typedef enum {
     ENTRY_DIR = 0,
@@ -24,6 +35,11 @@ static char      s_paths[MUSICLIST_MAX][MUSIC_PATH_MAX];
 static EntryKind s_kinds[MUSICLIST_MAX];
 static int       s_count;
 static int       s_selected;
+
+static void invalidate_draw(void)
+{
+    (void)0;
+}
 
 static int is_audio_ext(const char *name)
 {
@@ -60,6 +76,7 @@ static void clear_list(void)
 {
     s_count    = 0;
     s_selected = 0;
+    invalidate_draw();
 }
 
 static void sort_entries(void)
@@ -215,6 +232,22 @@ int musiclist_enter(void)
     return scan_cwd();
 }
 
+int musiclist_activate(void)
+{
+    if (s_count == 0)
+        return -1;
+    if (s_kinds[s_selected] == ENTRY_DIR)
+        return musiclist_enter() == 0 ? 1 : -1;
+    return 0;
+}
+
+const char *musiclist_play_path(void)
+{
+    if (s_count == 0 || s_kinds[s_selected] == ENTRY_DIR)
+        return NULL;
+    return s_paths[s_selected];
+}
+
 int musiclist_go_back(void)
 {
     if (strcmp(s_cwd, MUSIC_DIR_FS) == 0)
@@ -248,43 +281,86 @@ static int scroll_offset(void)
     return off;
 }
 
-void musiclist_draw(PrintConsole *top, int playing, int paused)
+static void draw_list_line(int line, int idx, char mark, u32 color)
 {
-    if (top == NULL)
-        return;
-    consoleSelect(top);
+    char buf[MUSIC_NAME_MAX + 8];
+    if (s_kinds[idx] == ENTRY_DIR)
+        snprintf(buf, sizeof(buf), "%c [%s]", mark, s_names[idx]);
+    else
+        snprintf(buf, sizeof(buf), "%c %s", mark, s_names[idx]);
+    jptext_draw(JPTEXT_X, jptext_line_y(line), color, buf);
+}
 
+static void draw_header(void)
+{
     char label[MUSIC_PATH_MAX + 16];
     cwd_to_label(label, sizeof(label));
-    printf("\x1b[1;1H\x1b[K%.47s (%d)", label, s_count);
+    char buf[MUSIC_PATH_MAX + 24];
+    snprintf(buf, sizeof(buf), "%.58s (%d)", label, s_count);
+    jptext_draw(JPTEXT_X, jptext_line_y(LINE_HEADER), CLR_SELECT, buf);
+}
 
-    for (int row = LIST_ROW_FIRST; row <= LIST_ROW_LAST; row++)
-        printf("\x1b[%d;1H\x1b[K", row);
+static void draw_status(int playing, int paused)
+{
+    int         err = audio_last_play_error();
+    char        buf[80];
+    const char *msg;
+    u32         clr = CLR_NORMAL;
 
-    if (s_count == 0) {
-        printf("\x1b[3;1H\x1b[K(empty folder)");
-    } else {
-        int off = scroll_offset();
-        for (int i = 0; i < LIST_VISIBLE; i++) {
-            int idx = off + i;
-            if (idx >= s_count)
-                break;
-            int  row = LIST_ROW_FIRST + i;
-            char mark = (idx == s_selected) ? '>' : ' ';
-            if (s_kinds[idx] == ENTRY_DIR)
-                printf("\x1b[%d;1H\x1b[K%c [%s]", row, mark, s_names[idx]);
-            else
-                printf("\x1b[%d;1H\x1b[K%c %s", row, mark, s_names[idx]);
-        }
+    if (err != 0) {
+        msg = audio_error_message(err);
+        snprintf(buf, sizeof(buf), "Error: %s (%d)", msg ? msg : "?", err);
+        clr = CLR_ERROR;
+        jptext_draw(JPTEXT_X, jptext_line_y(LINE_STATUS), clr, buf);
+        return;
     }
 
-    printf("\x1b[20;1H\x1b[K");
     if (playing)
-        printf("Playing...");
+        msg = "Playing...";
     else if (paused)
-        printf("Paused.");
+        msg = "Paused.";
     else
-        printf("Stopped.");
+        msg = "Stopped.";
+    jptext_draw(JPTEXT_X, jptext_line_y(LINE_STATUS), clr, msg);
+}
 
-    printf("\x1b[21;1H\x1b[KUp/Down=select  A=open/play  B=back  START=exit");
+static void draw_help(void)
+{
+    jptext_draw(
+        JPTEXT_X, jptext_line_y(LINE_HELP), CLR_NORMAL,
+        "Up/Down=select  A=open/play  B=back  START=exit");
+}
+
+static void draw_visible_list(int off)
+{
+    for (int i = 0; i < LIST_VISIBLE; i++) {
+        int idx = off + i;
+        if (idx >= s_count)
+            break;
+        char mark = (idx == s_selected) ? '>' : ' ';
+        u32  clr  = (idx == s_selected) ? CLR_SELECT : CLR_NORMAL;
+        draw_list_line(LINE_LIST0 + i, idx, mark, clr);
+    }
+}
+
+static void draw_full(int playing, int paused)
+{
+    jptext_begin();
+    topbg_draw_full();
+    draw_header();
+    if (s_count == 0)
+        jptext_draw(JPTEXT_X, jptext_line_y(LINE_LIST0), CLR_NORMAL, "(empty folder)");
+    else
+        draw_visible_list(scroll_offset());
+    draw_status(playing, paused);
+    draw_help();
+    jptext_end();
+}
+
+void musiclist_draw(PrintConsole *top, int playing, int paused)
+{
+    (void)top;
+    if (!jptext_ok())
+        return;
+    draw_full(playing, paused);
 }

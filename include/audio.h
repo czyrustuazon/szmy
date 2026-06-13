@@ -55,6 +55,12 @@ void audio_note_paused_at(int64_t sample);
 /* True when playback is exiting because of pause (not stop). */
 int audio_end_is_pause(void);
 
+/* Human-readable message for a playback error code (NULL if code is 0). */
+const char *audio_error_message(int error);
+
+/* Last playback error, or 0. Persists until the next play attempt. */
+int audio_last_play_error(void);
+
 #ifdef __cplusplus
 }
 #endif
