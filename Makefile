@@ -143,8 +143,10 @@ export OFILES_BIN := $(addsuffix .o,$(BINFILES)) \
 	$(addsuffix .o,$(T3XFILES))
 
 # Embedded top BG: 400x240 rescaled in build/ (keeps .cia small). Source: gfx/top_screen_bg.bmp
+# Bottom: play/pause (process rules below -> build/*.bmp, then bin2o)
 export GFX_EMBED      := top_screen_bg_embed.bmp.o
-export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES) $(GFX_EMBED)
+export BTN_BMP_O      := play_active.bmp.o play_inactive.bmp.o pause_active.bmp.o pause_inactive.bmp.o
+export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES) $(GFX_EMBED) $(BTN_BMP_O)
 
 export HFILES := $(PICAFILES:.v.pica=_shbin.h) $(SHLISTFILES:.shlist=_shbin.h) \
 	$(addsuffix .h,$(subst .,_,$(BINFILES))) \
@@ -205,12 +207,61 @@ $(TOP_BG_EMBED): $(TOP_BG_SRC) | $(BUILD)
 		cp -f "$<" "$$out"; \
 	fi
 
+# Bottom play/pause: 1% black transparent, trim, cap 32px, tile 32x32 BMP4 (half of prior 64).
+# Unchanged magick strategy per request; 24-bit fallback still uses alpha_key() in C.
+$(CURDIR)/$(BUILD)/play_active.bmp: $(CURDIR)/gfx/play_active.bmp | $(BUILD)
+	@echo "btn play_active (alpha, trim, <=32) ..."
+	@in="$(CURDIR)/gfx/play_active.bmp"; out="$(CURDIR)/$(BUILD)/play_active.bmp"; \
+	if command -v magick >/dev/null 2>&1; then \
+		magick "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	elif command -v convert >/dev/null 2>&1; then \
+		convert "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	else cp -f "$$in" "$$out"; fi
+
+$(CURDIR)/$(BUILD)/play_inactive.bmp: $(CURDIR)/gfx/play_inactive.bmp | $(BUILD)
+	@echo "btn play_inactive ..."
+	@in="$(CURDIR)/gfx/play_inactive.bmp"; out="$(CURDIR)/$(BUILD)/play_inactive.bmp"; \
+	if command -v magick >/dev/null 2>&1; then \
+		magick "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	elif command -v convert >/dev/null 2>&1; then \
+		convert "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	else cp -f "$$in" "$$out"; fi
+
+$(CURDIR)/$(BUILD)/pause_active.bmp: $(CURDIR)/gfx/pause_active.bmp | $(BUILD)
+	@echo "btn pause_active ..."
+	@in="$(CURDIR)/gfx/pause_active.bmp"; out="$(CURDIR)/$(BUILD)/pause_active.bmp"; \
+	if command -v magick >/dev/null 2>&1; then \
+		magick "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	elif command -v convert >/dev/null 2>&1; then \
+		convert "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	else cp -f "$$in" "$$out"; fi
+
+$(CURDIR)/$(BUILD)/pause_inactive.bmp: $(CURDIR)/gfx/pause_inactive.bmp | $(BUILD)
+	@echo "btn pause_inactive ..."
+	@in="$(CURDIR)/gfx/pause_inactive.bmp"; out="$(CURDIR)/$(BUILD)/pause_inactive.bmp"; \
+	if command -v magick >/dev/null 2>&1; then \
+		magick "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	elif command -v convert >/dev/null 2>&1; then \
+		convert "$$in" -strip -fuzz 1% -transparent black -trim +repage -resize "32x32>" \
+			-gravity center -background none -extent 32x32 -define bmp:format=bmp4 "BMP4:$$out" 2>/dev/null || cp -f "$$in" "$$out"; \
+	else cp -f "$$in" "$$out"; fi
+
+BTN_BMPS := $(CURDIR)/$(BUILD)/play_active.bmp $(CURDIR)/$(BUILD)/play_inactive.bmp \
+	$(CURDIR)/$(BUILD)/pause_active.bmp $(CURDIR)/$(BUILD)/pause_inactive.bmp
+
 #---------------------------------------------------------------------------------
 $(VGMSTREAM_LIB):
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds PORTLIBS_3DS="$(PORTLIBS_3DS)" ENABLE_MP3="$(ENABLE_MP3)"
 
 #---------------------------------------------------------------------------------
-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES) $(VGMSTREAM_LIB) $(TOP_BG_EMBED)
+all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES) $(VGMSTREAM_LIB) $(TOP_BG_EMBED) $(BTN_BMPS)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
@@ -279,6 +330,25 @@ top_screen_bg_embed.bmp.o: top_screen_bg_embed.bmp
 	@$(bin2o)
 
 topbg.o: top_screen_bg_embed.bmp.o
+
+#---------------------------------------------------------------------------------
+play_active.bmp.o: play_active.bmp
+	@echo $(notdir $<)
+	@$(bin2o)
+
+play_inactive.bmp.o: play_inactive.bmp
+	@echo $(notdir $<)
+	@$(bin2o)
+
+pause_active.bmp.o: pause_active.bmp
+	@echo $(notdir $<)
+	@$(bin2o)
+
+pause_inactive.bmp.o: pause_inactive.bmp
+	@echo $(notdir $<)
+	@$(bin2o)
+
+botbuttons.o: play_active.bmp.o play_inactive.bmp.o pause_active.bmp.o pause_inactive.bmp.o
 
 #---------------------------------------------------------------------------------
 %.bin.o %_bin.h : %.bin

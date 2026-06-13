@@ -88,7 +88,8 @@ main.o: C:/Users/Zepse/Documents/szmy/source/main.c \
  C:/devkitPro/libctru/include/3ds/3dslink.h \
  C:/Users/Zepse/Documents/szmy/include/audio.h \
  C:/Users/Zepse/Documents/szmy/include/topbg.h \
- C:/Users/Zepse/Documents/szmy/include/topfont.h
+ C:/Users/Zepse/Documents/szmy/include/topfont.h \
+ C:/Users/Zepse/Documents/szmy/include/botbuttons.h
 C:/devkitPro/libctru/include/3ds.h:
 C:/devkitPro/libctru/include/3ds/types.h:
 C:/devkitPro/libctru/include/3ds/result.h:
@@ -179,3 +180,4 @@ C:/devkitPro/libctru/include/3ds/3dslink.h:
 C:/Users/Zepse/Documents/szmy/include/audio.h:
 C:/Users/Zepse/Documents/szmy/include/topbg.h:
 C:/Users/Zepse/Documents/szmy/include/topfont.h:
+C:/Users/Zepse/Documents/szmy/include/botbuttons.h:

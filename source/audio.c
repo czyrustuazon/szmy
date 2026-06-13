@@ -12,7 +12,8 @@
 #define FLAC_MAGIC "fLaC"
 
 #define SAMPLES_PER_BUF  (1600)
-#define N_WAVEBUFS       (2)
+#define N_WAVEBUFS       (4)
+#define PLAYBACK_YIELD_US  (8000) /* yield when no buffer filled; avoids tying decode to vblank */
 
 static bool g_audio_initialized = false;
 static volatile bool g_stop_requested = false;
@@ -171,6 +172,7 @@ int audio_play_file(const char *path)
     bool stream_done = false;
 
     while (!g_stop_requested) {
+        bool progressed = false;
         if (!stream_done) {
             ndspWaveBuf *wb = &g_waveBufs[next_buf];
             if (wb->status == NDSP_WBUF_FREE || wb->status == NDSP_WBUF_DONE) {
@@ -184,6 +186,7 @@ int audio_play_file(const char *path)
                     DSP_FlushDataCache(bufs[next_buf], buf_bytes);
                     ndspChnWaveBufAdd(channel_id, wb);
                     next_buf = (next_buf + 1) % N_WAVEBUFS;
+                    progressed = true;
                 }
             }
         }
@@ -195,7 +198,8 @@ int audio_play_file(const char *path)
             if (all_done)
                 break;
         }
-        gspWaitForVBlank();
+        if (!progressed)
+            svcSleepThread(PLAYBACK_YIELD_US);
     }
 
     ndspChnWaveBufClear(channel_id);
