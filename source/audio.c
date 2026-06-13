@@ -219,6 +219,14 @@ static int is_flac_path(const char *path)
     return dot && (strcasecmp(dot, ".flac") == 0);
 }
 
+static int is_mp3_path(const char *path)
+{
+    const char *dot = strrchr(path, '.');
+    if (!dot)
+        return 0;
+    return strcasecmp(dot, ".mp3") == 0 || strcasecmp(dot, ".mp2") == 0;
+}
+
 static int is_flac_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -236,6 +244,9 @@ int audio_play_file(const char *path)
 
     if (is_flac_path(path) || is_flac_file(path))
         return audio_play_flac(path);
+
+    if (is_mp3_path(path))
+        return audio_play_mp3(path);
 
     g_stop_requested = false;
     g_pause_requested = false;
