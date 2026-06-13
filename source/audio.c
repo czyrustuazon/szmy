@@ -13,21 +13,25 @@
 
 #define SAMPLES_PER_BUF  (1600)
 #define N_WAVEBUFS       (4)
-#define PLAYBACK_YIELD_US  (8000) /* yield when no buffer filled; avoids tying decode to vblank */
+#define PLAYBACK_YIELD_US  (8000)
 
 static bool g_audio_initialized = false;
 static volatile bool g_stop_requested = false;
+static volatile bool g_pause_requested = false;
 static volatile bool g_playing = false;
-static Thread g_play_thread = NULL;
+static bool g_paused = false;
+static bool g_have_resume = false;
 static char g_play_path[256];
+static int64_t g_resume_sample = 0;
 
 static void wait_playback_idle(void)
 {
-    if (g_play_thread) {
-        g_stop_requested = true;
-        threadJoin(g_play_thread, U64_MAX);
-        g_play_thread = NULL;
-    }
+    g_stop_requested = true;
+    g_pause_requested = false;
+    while (g_playing)
+        svcSleepThread(100000);
+    g_paused = false;
+    g_have_resume = false;
 }
 
 int audio_init(void)
@@ -53,6 +57,23 @@ void audio_exit(void)
 void audio_stop(void)
 {
     g_stop_requested = true;
+    g_pause_requested = false;
+    g_paused = false;
+    g_have_resume = false;
+}
+
+void audio_pause(void)
+{
+    if (!g_playing)
+        return;
+    g_pause_requested = true;
+}
+
+void audio_resume(void)
+{
+    if (!g_paused || g_playing)
+        return;
+    (void)audio_play_file_async(g_play_path);
 }
 
 int audio_should_stop(void)
@@ -60,26 +81,66 @@ int audio_should_stop(void)
     return g_stop_requested;
 }
 
+int audio_playback_should_exit(void)
+{
+    return g_stop_requested || g_pause_requested;
+}
+
+int64_t audio_take_resume_sample(void)
+{
+    if (!g_have_resume)
+        return -1;
+    g_have_resume = false;
+    return g_resume_sample;
+}
+
+void audio_note_paused_at(int64_t sample)
+{
+    g_resume_sample = sample;
+    g_have_resume = true;
+    g_paused = true;
+    g_pause_requested = false;
+}
+
+int audio_end_is_pause(void)
+{
+    return g_pause_requested && !g_stop_requested;
+}
+
 static void playback_thread_func(void *arg)
 {
     (void)arg;
     g_playing = true;
     g_stop_requested = false;
+    g_pause_requested = false;
     audio_play_file(g_play_path);
+    if (!g_paused)
+        g_have_resume = false;
     g_playing = false;
 }
 
 int audio_play_file_async(const char *path)
 {
-    if (!path || !g_audio_initialized)
+    if (!g_audio_initialized)
         return -1;
     if (g_playing)
-        return -6; /* already playing */
-    strncpy(g_play_path, path, sizeof(g_play_path) - 1);
-    g_play_path[sizeof(g_play_path) - 1] = '\0';
+        return -6;
 
-    g_play_thread = threadCreate(playback_thread_func, NULL, 0x8000, 0x30, -1, false);
-    if (!g_play_thread)
+    if (g_paused) {
+        /* Resume: keep g_have_resume + g_resume_sample from pause. */
+        g_paused = false;
+    } else {
+        if (!path)
+            return -1;
+        strncpy(g_play_path, path, sizeof(g_play_path) - 1);
+        g_play_path[sizeof(g_play_path) - 1] = '\0';
+        g_have_resume = false;
+    }
+
+    g_stop_requested = false;
+    g_pause_requested = false;
+
+    if (!threadCreate(playback_thread_func, NULL, 0x8000, 0x30, -1, true))
         return -7;
     return 0;
 }
@@ -87,6 +148,11 @@ int audio_play_file_async(const char *path)
 int audio_is_playing(void)
 {
     return g_playing;
+}
+
+int audio_is_paused(void)
+{
+    return g_paused && !g_playing;
 }
 
 static ndspWaveBuf g_waveBufs[N_WAVEBUFS];
@@ -98,7 +164,6 @@ static int is_flac_path(const char *path)
     return dot && (strcasecmp(dot, ".flac") == 0);
 }
 
-/* Peek at file magic bytes; returns true if file starts with FLAC signature. */
 static int is_flac_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -114,23 +179,27 @@ int audio_play_file(const char *path)
     if (!path || !g_audio_initialized)
         return -1;
 
-    /* FLAC by extension or by file content (e.g. music.wav containing FLAC) */
     if (is_flac_path(path) || is_flac_file(path))
         return audio_play_flac(path);
 
     g_stop_requested = false;
+    g_pause_requested = false;
 
     libstreamfile_t *libsf = libstreamfile_open_from_stdio(path);
-    if (!libsf) {
-        return -2; /* open failed */
-    }
+    if (!libsf)
+        return -2;
 
     libvgmstream_config_t cfg = {0};
     cfg.allow_play_forever = false;
     libvgmstream_t *vg = libvgmstream_create(libsf, 0, &cfg);
     libstreamfile_close(libsf);
-    if (!vg) {
-        return -3; /* format not supported or init failed */
+    if (!vg)
+        return -3;
+
+    {
+        int64_t resume = audio_take_resume_sample();
+        if (resume >= 0)
+            libvgmstream_seek(vg, resume);
     }
 
     const libvgmstream_format_t *fmt = vg->format;
@@ -138,7 +207,7 @@ int audio_play_file(const char *path)
     int sr = fmt->sample_rate;
     if (ch < 1 || ch > 2 || sr < 300 || sr > 48000) {
         libvgmstream_free(vg);
-        return -4; /* unsupported channel/count or rate for NDSP */
+        return -4;
     }
 
     int ndsp_format = (ch == 2) ? NDSP_FORMAT_STEREO_PCM16 : NDSP_FORMAT_MONO_PCM16;
@@ -171,7 +240,7 @@ int audio_play_file(const char *path)
     int ret = 0;
     bool stream_done = false;
 
-    while (!g_stop_requested) {
+    while (!audio_playback_should_exit()) {
         bool progressed = false;
         if (!stream_done) {
             ndspWaveBuf *wb = &g_waveBufs[next_buf];
@@ -201,6 +270,9 @@ int audio_play_file(const char *path)
         if (!progressed)
             svcSleepThread(PLAYBACK_YIELD_US);
     }
+
+    if (audio_end_is_pause())
+        audio_note_paused_at(libvgmstream_get_play_position(vg));
 
     ndspChnWaveBufClear(channel_id);
     for (int i = 0; i < N_WAVEBUFS; i++)

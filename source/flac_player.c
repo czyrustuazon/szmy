@@ -15,6 +15,7 @@
 /* Ring buffer: ~2 seconds stereo @ 44.1kHz = 176400 bytes/channel * 2 = 352800. Use 384 KB. */
 #define RING_BYTES       (384 * 1024)
 #define DECODE_STACK     0x8000
+#define PLAYBACK_YIELD_US  (8000)
 
 typedef struct {
     drflac *flac;
@@ -38,7 +39,7 @@ static void decode_thread(void *arg)
         return;
     }
 
-    while (!r->stop && !audio_should_stop()) {
+    while (!r->stop && !audio_playback_should_exit()) {
         size_t used = r->write_pos - r->read_pos;
         if (used > r->ring_size - r->chunk_bytes) {
             /* Ring full, yield to let consumer drain */
@@ -74,6 +75,11 @@ int audio_play_flac(const char *path)
     drflac *flac = drflac_open_file(path, NULL);
     if (!flac)
         return -1;
+
+    int64_t resume = audio_take_resume_sample();
+    int resuming = (resume >= 0);
+    if (resuming)
+        drflac_seek_to_pcm_frame(flac, (drflac_uint64)resume);
 
     unsigned int ch = flac->channels;
     unsigned int sr = flac->sampleRate;
@@ -133,11 +139,11 @@ int audio_play_flac(const char *path)
         waveBufs[i].status = NDSP_WBUF_FREE;
     }
 
-    /* Pre-fill: wait until we have ~1 second buffered before starting playback */
-    size_t prefill = (size_t)(sr * ch * 2); /* 1 second stereo */
+    /* Pre-fill before first output; keep resume start short. */
+    size_t prefill = resuming ? (chunk_bytes * 2u) : (size_t)(sr * ch * 2);
     if (prefill > ring.ring_size / 2)
         prefill = ring.ring_size / 2;
-    while (!audio_should_stop()) {
+    while (!audio_playback_should_exit()) {
         LightLock_Lock(&ring.lock);
         size_t avail = ring.write_pos - ring.read_pos;
         LightLock_Unlock(&ring.lock);
@@ -148,8 +154,10 @@ int audio_play_flac(const char *path)
 
     int next = 0;
     bool stream_done = false;
+    uint64_t samples_fed = 0;
+    int pausing = 0;
 
-    while (!stream_done && !audio_should_stop()) {
+    while (!stream_done && !audio_playback_should_exit()) {
         ndspWaveBuf *wb = &waveBufs[next];
         if (wb->status == NDSP_WBUF_FREE || wb->status == NDSP_WBUF_DONE) {
             LightLock_Lock(&ring.lock);
@@ -170,6 +178,7 @@ int audio_play_flac(const char *path)
                 wb->nsamples = SAMPLES_PER_BUF;
                 DSP_FlushDataCache(bufs[next], buf_bytes);
                 ndspChnWaveBufAdd(channel_id, wb);
+                samples_fed += SAMPLES_PER_BUF;
                 next = (next + 1) % N_WAVEBUFS;
             } else if (ring.decode_done) {
                 /* Partial last chunk or exact end */
@@ -191,11 +200,12 @@ int audio_play_flac(const char *path)
                     wb->nsamples = (u32)samples;
                     DSP_FlushDataCache(bufs[next], buf_bytes);
                     ndspChnWaveBufAdd(channel_id, wb);
+                    samples_fed += samples;
                     next = (next + 1) % N_WAVEBUFS;
                 }
                 stream_done = true;
-            } else if (!audio_should_stop()) {
-                gspWaitForVBlank();
+            } else {
+                svcSleepThread(PLAYBACK_YIELD_US);
             }
         } else {
             LightLock_Lock(&ring.lock);
@@ -204,30 +214,18 @@ int audio_play_flac(const char *path)
             if (ring.decode_done && a == 0)
                 stream_done = true;
             else
-                gspWaitForVBlank();
+                svcSleepThread(PLAYBACK_YIELD_US);
         }
     }
 
-    ring.stop = true;  /* signal decode thread to exit */
-
-    /* If user stopped, clear immediately; otherwise drain queued buffers */
-    if (audio_should_stop())
-        ndspChnWaveBufClear(channel_id);
-    else {
-        bool all_done = false;
-        while (!all_done) {
-            all_done = true;
-            for (int i = 0; i < N_WAVEBUFS; i++)
-                if (waveBufs[i].status == NDSP_WBUF_PLAYING)
-                    all_done = false;
-            if (!all_done)
-                gspWaitForVBlank();
-        }
-    }
-
+    ring.stop = true;
+    pausing = audio_end_is_pause();
     threadJoin(th, U64_MAX);
-
     ndspChnWaveBufClear(channel_id);
+
+    if (pausing)
+        audio_note_paused_at((int64_t)samples_fed);
+
     for (int i = 0; i < N_WAVEBUFS; i++)
         linearFree(bufs[i]);
     linearFree(ring.ring);

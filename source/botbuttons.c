@@ -273,7 +273,7 @@ void botbuttons_frame(PrintConsole *bottom) {
         } else if (point_in(
                      s_last_x, s_last_y, s_sdx0, s_sdy0, (int)(s_saw > s_siw ? s_saw : s_siw), (int)(s_sah > s_sih ? s_sah : s_sih))
                  && audio_is_playing()) {
-            audio_stop();
+            audio_pause();
         }
     }
 

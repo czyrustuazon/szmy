@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 /* Initialize NDSP (call once at startup). Returns 0 on success. */
 int audio_init(void);
 
@@ -22,15 +24,36 @@ int audio_play_flac(const char *path);
 /* Request playback to stop (call from another thread or signal; playback thread will exit). */
 void audio_stop(void);
 
+/* Pause at current position (playback thread exits cleanly; use audio_resume() to continue). */
+void audio_pause(void);
+
+/* Resume from a paused position. */
+void audio_resume(void);
+
 /* Returns true if user requested stop (used internally by playback). */
 int audio_should_stop(void);
 
+/* Returns true if playback should exit (stop or pause requested). */
+int audio_playback_should_exit(void);
+
 /* Start playback in background; returns immediately. Main loop can process input while playing.
- * Returns 0 on success, negative on error. Use audio_stop() to stop, audio_is_playing() to check. */
+ * Returns 0 on success, negative on error. Resumes if paused; use audio_stop() to fully stop. */
 int audio_play_file_async(const char *path);
 
-/* True if playback is currently running (async). */
+/* True if audio is actively playing. */
 int audio_is_playing(void);
+
+/* True if playback is paused and can be resumed. */
+int audio_is_paused(void);
+
+/* Resume sample for next play (-1 = from start). Used internally by playback. */
+int64_t audio_take_resume_sample(void);
+
+/* Save resume point after a clean pause. Used internally by playback. */
+void audio_note_paused_at(int64_t sample);
+
+/* True when playback is exiting because of pause (not stop). */
+int audio_end_is_pause(void);
 
 #ifdef __cplusplus
 }

@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
     printf("\x1b[8;1HPress START to exit.");
     printf(
         "\x1b[10;1HDPad Left/Right = counter. Lower strip: play (left) & pause (right), touch to press.");
-    printf("\x1b[11;1HA=play  B=stop  (same as bottom controls)");
+    printf("\x1b[11;1HA=play  B=stop  Pause=hold position (bottom right)");
 
     if (audio_init() != 0)
         printf("\x1b[12;1HAudio init failed (DSP firmware?).");
@@ -65,11 +65,11 @@ int main(int argc, char *argv[])
             printf(
                 "\x1b[12;1HPlay: %d (0=ok, -6=busy) %s",
                 r,
-                audio_is_playing() ? "[playing]" : "      ");
+                audio_is_playing() ? "[playing]" : (audio_is_paused() ? "[paused]" : "        "));
         }
         if (kDown & KEY_B) {
             audio_stop();
-            if (!audio_is_playing())
+            if (!audio_is_playing() && !audio_is_paused())
                 printf("\x1b[12;1HStopped.                    ");
         }
         if (kDown & KEY_DLEFT)
