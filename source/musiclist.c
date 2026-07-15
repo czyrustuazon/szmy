@@ -1,18 +1,27 @@
 #include "musiclist.h"
-#include "topbg.h"
-#include "jptext.h"
+#include "path_util.h"
 #include "audio.h"
-#include <citro2d.h>
+#ifdef UNIT_TEST
+#include "dirent_compat.h"
+#else
 #include <dirent.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 
+#ifndef UNIT_TEST
+#include "topbg.h"
+#include "jptext.h"
+#include <citro2d.h>
+#endif
+
 #define MUSICLIST_MAX      128
 #define MUSIC_NAME_MAX     48
 
+#ifndef UNIT_TEST
 #define LIST_VISIBLE       14
 #define LINE_HEADER        0
 #define LINE_LIST0         1
@@ -23,6 +32,7 @@
 #define CLR_NORMAL  C2D_Color32(0xE0, 0xE0, 0xE0, 0xFF)
 #define CLR_SELECT  C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF)
 #define CLR_ERROR   C2D_Color32(0xFF, 0xA0, 0xA0, 0xFF)
+#endif
 
 typedef enum {
     ENTRY_DIR = 0,
@@ -30,6 +40,7 @@ typedef enum {
 } EntryKind;
 
 static char      s_cwd[MUSIC_PATH_MAX];
+static char      s_root[MUSIC_PATH_MAX];
 static char      s_names[MUSICLIST_MAX][MUSIC_NAME_MAX];
 static char      s_paths[MUSICLIST_MAX][MUSIC_PATH_MAX];
 static EntryKind s_kinds[MUSICLIST_MAX];
@@ -39,25 +50,6 @@ static int       s_selected;
 static void invalidate_draw(void)
 {
     (void)0;
-}
-
-static int is_audio_ext(const char *name)
-{
-    const char *dot = strrchr(name, '.');
-    if (dot == NULL || dot[1] == '\0')
-        return 0;
-    dot++;
-    static const char *exts[] = {
-        "wav", "flac", "mp3", "ogg", "opus", "aac", "m4a",
-        "brstm", "bcwav", "bcstm", "bfstm", "bfwav", "sap",
-        "sbc", "adx", "hca", "at9", "idsp", "dsp", "fsb",
-        NULL
-    };
-    for (int i = 0; exts[i]; i++) {
-        if (strcasecmp(dot, exts[i]) == 0)
-            return 1;
-    }
-    return 0;
 }
 
 static int entry_is_dir(const char *path, const struct dirent *ent)
@@ -71,6 +63,16 @@ static int entry_is_dir(const char *path, const struct dirent *ent)
         return 0;
     return S_ISDIR(st.st_mode);
 }
+
+#ifdef UNIT_TEST
+int musiclist_test_entry_is_dir(const char *path, unsigned char d_type)
+{
+    struct dirent ent;
+    memset(&ent, 0, sizeof(ent));
+    ent.d_type = d_type;
+    return entry_is_dir(path, &ent);
+}
+#endif
 
 static void clear_list(void)
 {
@@ -108,6 +110,71 @@ static void sort_entries(void)
     }
 }
 
+#ifdef UNIT_TEST
+#define SCAN_INJECT_MAX 32
+static struct {
+    char name[MUSIC_NAME_MAX];
+    unsigned char d_type;
+} g_scan_inj[SCAN_INJECT_MAX];
+static int g_scan_inj_n;
+static int g_scan_inj_i;
+static int g_scan_inj_active;
+static int g_scan_cap;
+
+void musiclist_test_clear_scan_inject(void)
+{
+    g_scan_inj_n      = 0;
+    g_scan_inj_i      = 0;
+    g_scan_inj_active = 0;
+    g_scan_cap        = 0;
+}
+
+void musiclist_test_add_scan_entry(const char *name, unsigned char d_type)
+{
+    if (!name || g_scan_inj_n >= SCAN_INJECT_MAX)
+        return;
+    strncpy(g_scan_inj[g_scan_inj_n].name, name, MUSIC_NAME_MAX - 1);
+    g_scan_inj[g_scan_inj_n].name[MUSIC_NAME_MAX - 1] = '\0';
+    g_scan_inj[g_scan_inj_n].d_type = d_type;
+    g_scan_inj_n++;
+    g_scan_inj_active = 1;
+}
+
+void musiclist_test_set_scan_cap(int n)
+{
+    g_scan_cap = n;
+}
+
+void musiclist_test_set_cwd_root(const char *cwd, const char *root)
+{
+    if (cwd) {
+        strncpy(s_cwd, cwd, MUSIC_PATH_MAX - 1);
+        s_cwd[MUSIC_PATH_MAX - 1] = '\0';
+    }
+    if (root) {
+        strncpy(s_root, root, MUSIC_PATH_MAX - 1);
+        s_root[MUSIC_PATH_MAX - 1] = '\0';
+    }
+}
+
+static struct dirent g_scan_inj_ent;
+
+static struct dirent *scan_next_ent(DIR *dir)
+{
+    if (g_scan_inj_active) {
+        if (g_scan_inj_i >= g_scan_inj_n)
+            return NULL;
+        memset(&g_scan_inj_ent, 0, sizeof(g_scan_inj_ent));
+        strncpy(g_scan_inj_ent.d_name, g_scan_inj[g_scan_inj_i].name,
+                sizeof(g_scan_inj_ent.d_name) - 1);
+        g_scan_inj_ent.d_type = g_scan_inj[g_scan_inj_i].d_type;
+        g_scan_inj_i++;
+        return &g_scan_inj_ent;
+    }
+    return readdir(dir);
+}
+#endif
+
 static int scan_cwd(void)
 {
     clear_list();
@@ -116,8 +183,21 @@ static int scan_cwd(void)
     if (dir == NULL)
         return -1;
 
+#ifdef UNIT_TEST
+    int limit = (g_scan_cap > 0) ? g_scan_cap : MUSICLIST_MAX;
+    g_scan_inj_i = 0;
+#else
+    int limit = MUSICLIST_MAX;
+#endif
+
     struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL && s_count < MUSICLIST_MAX) {
+    while ((ent =
+#ifdef UNIT_TEST
+            scan_next_ent(dir)
+#else
+            readdir(dir)
+#endif
+            ) != NULL && s_count < limit) {
         if (ent->d_name[0] == '.')
             continue;
 
@@ -126,12 +206,12 @@ static int scan_cwd(void)
 
         if (ent->d_type == DT_DIR) {
             s_kinds[s_count] = ENTRY_DIR;
-        } else if (ent->d_type == DT_REG && is_audio_ext(ent->d_name)) {
+        } else if (ent->d_type == DT_REG && path_is_audio_extension(ent->d_name)) {
             s_kinds[s_count] = ENTRY_FILE;
         } else if (ent->d_type == DT_UNKNOWN) {
             if (entry_is_dir(full, ent))
                 s_kinds[s_count] = ENTRY_DIR;
-            else if (is_audio_ext(ent->d_name))
+            else if (path_is_audio_extension(ent->d_name))
                 s_kinds[s_count] = ENTRY_FILE;
             else
                 continue;
@@ -152,30 +232,28 @@ static int scan_cwd(void)
     return 0;
 }
 
-static void cwd_to_label(char *out, size_t out_sz)
+int musiclist_open(const char *dir)
 {
-    if (strncmp(s_cwd, MUSIC_DIR_FS, strlen(MUSIC_DIR_FS)) != 0) {
-        snprintf(out, out_sz, "%s", s_cwd);
-        return;
-    }
-    if (strcmp(s_cwd, MUSIC_DIR_FS) == 0) {
-        snprintf(out, out_sz, "%s", MUSIC_DIR_LABEL);
-        return;
-    }
-    snprintf(out, out_sz, "%s%s", MUSIC_DIR_LABEL, s_cwd + strlen(MUSIC_DIR_FS));
+    if (!dir)
+        return -1;
+    strncpy(s_cwd, dir, MUSIC_PATH_MAX - 1);
+    s_cwd[MUSIC_PATH_MAX - 1] = '\0';
+    strncpy(s_root, dir, MUSIC_PATH_MAX - 1);
+    s_root[MUSIC_PATH_MAX - 1] = '\0';
+    s_selected = 0;
+    return scan_cwd();
 }
 
 int musiclist_init(void)
 {
-    strncpy(s_cwd, MUSIC_DIR_FS, MUSIC_PATH_MAX - 1);
-    s_cwd[MUSIC_PATH_MAX - 1] = '\0';
-    return scan_cwd();
+    return musiclist_open(MUSIC_DIR_FS);
 }
 
 void musiclist_exit(void)
 {
     clear_list();
     s_cwd[0] = '\0';
+    s_root[0] = '\0';
 }
 
 int musiclist_count(void)
@@ -250,7 +328,7 @@ const char *musiclist_play_path(void)
 
 int musiclist_go_back(void)
 {
-    if (strcmp(s_cwd, MUSIC_DIR_FS) == 0)
+    if (strcmp(s_cwd, s_root) == 0)
         return -1;
 
     char *slash = strrchr(s_cwd, '/');
@@ -258,15 +336,16 @@ int musiclist_go_back(void)
         return -1;
 
     *slash = '\0';
-    if (strlen(s_cwd) < strlen(MUSIC_DIR_FS) || strncmp(s_cwd, MUSIC_DIR_FS, strlen(MUSIC_DIR_FS)) != 0) {
-        strncpy(s_cwd, MUSIC_DIR_FS, MUSIC_PATH_MAX - 1);
-        s_cwd[MUSIC_PATH_MAX - 1] = '\0';
+    if (strlen(s_cwd) < strlen(s_root) || strncmp(s_cwd, s_root, strlen(s_root)) != 0) {
+        musiclist_open(s_root);
         return -1;
     }
 
     s_selected = 0;
     return scan_cwd();
 }
+
+#ifndef UNIT_TEST
 
 static int scroll_offset(void)
 {
@@ -294,7 +373,7 @@ static void draw_list_line(int line, int idx, char mark, u32 color)
 static void draw_header(void)
 {
     char label[MUSIC_PATH_MAX + 16];
-    cwd_to_label(label, sizeof(label));
+    musiclist_format_cwd_label(s_cwd, label, sizeof(label));
     char buf[MUSIC_PATH_MAX + 24];
     snprintf(buf, sizeof(buf), "%.58s (%d)", label, s_count);
     jptext_draw(JPTEXT_X, jptext_line_y(LINE_HEADER), CLR_SELECT, buf);
@@ -364,3 +443,5 @@ void musiclist_draw(PrintConsole *top, int playing, int paused)
         return;
     draw_full(playing, paused);
 }
+
+#endif /* UNIT_TEST */

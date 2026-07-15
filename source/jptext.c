@@ -1,4 +1,5 @@
 #include "jptext.h"
+#include "jptext_errors.h"
 #include "topbg.h"
 #include <citro2d.h>
 #include <citro3d.h>
@@ -38,16 +39,7 @@ int jptext_init_error(void)
 
 const char *jptext_init_error_str(void)
 {
-    switch (s_init_error) {
-    case 1:  return "cfg:u";
-    case 2:  return "C3D";
-    case 3:  return "C2D";
-    case 4:  return "screen target";
-    case 5:  return "system font";
-    case 6:  return "text buffer";
-    case 7:  return "background";
-    default: return "?";
-    }
+    return jptext_error_str(s_init_error);
 }
 
 int jptext_ok(void)

@@ -1,0 +1,12 @@
+# Compiled test binaries and coverage data (see also root .gitignore)
+
+/build/
+/coverage_html/
+
+*.exe
+*.out
+*.o
+*.gcda
+*.gcno
+*.gcov
+coverage.info

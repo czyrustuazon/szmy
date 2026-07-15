@@ -4,72 +4,25 @@
 #include <3ds.h>
 #include <string.h>
 #include <stdio.h>
-#include <strings.h>
 #include "audio.h"
+#include "audio_ctrl.h"
+#include "audio_ctrl_internal.h"
+#include "file_magic.h"
 #include "libvgmstream.h"
-
-/* FLAC magic: "fLaC" at offset 0 */
-#define FLAC_MAGIC "fLaC"
 
 #define SAMPLES_PER_BUF  (1600)
 #define N_WAVEBUFS       (4)
 #define PLAYBACK_YIELD_US  (8000)
 
 static bool g_audio_initialized = false;
-static volatile bool g_stop_requested = false;
-static volatile bool g_pause_requested = false;
-static volatile bool g_playing = false;
-static bool g_paused = false;
-static bool g_have_resume = false;
 static char g_play_path[256];
-static int64_t g_resume_sample = 0;
-static volatile int g_last_play_error = 0;
-
-const char *audio_error_message(int error)
-{
-    switch (error) {
-    case 0:
-        return NULL;
-    case -1:
-        return "Cannot open file";
-    case -2:
-        return "Cannot read audio stream";
-    case -3:
-        return "Unsupported format";
-    case -4:
-        return "Unsupported channels/sample rate";
-    case -5:
-        return "Out of memory";
-    case -7:
-        return "Could not start playback";
-    default:
-        return "Playback failed";
-    }
-}
-
-int audio_last_play_error(void)
-{
-    return g_last_play_error;
-}
-
-static void set_play_error(int error)
-{
-    g_last_play_error = error;
-}
-
-static void clear_play_error(void)
-{
-    g_last_play_error = 0;
-}
 
 static void wait_playback_idle(void)
 {
-    g_stop_requested = true;
-    g_pause_requested = false;
-    while (g_playing)
+    audio_stop();
+    while (audio_is_playing())
         svcSleepThread(100000);
-    g_paused = false;
-    g_have_resume = false;
+    audio_ctrl_after_stop_wait();
 }
 
 int audio_init(void)
@@ -92,77 +45,19 @@ void audio_exit(void)
     g_audio_initialized = false;
 }
 
-void audio_stop(void)
-{
-    g_stop_requested = true;
-    g_pause_requested = false;
-    g_paused = false;
-    g_have_resume = false;
-}
-
-void audio_pause(void)
-{
-    if (!g_playing)
-        return;
-    g_pause_requested = true;
-}
-
-int audio_should_stop(void)
-{
-    return g_stop_requested;
-}
-
-int audio_playback_should_exit(void)
-{
-    return g_stop_requested || g_pause_requested;
-}
-
-int64_t audio_take_resume_sample(void)
-{
-    if (!g_have_resume)
-        return -1;
-    g_have_resume = false;
-    return g_resume_sample;
-}
-
-void audio_note_paused_at(int64_t sample)
-{
-    g_resume_sample = sample;
-    g_have_resume = true;
-    g_paused = true;
-    g_pause_requested = false;
-}
-
-int audio_end_is_pause(void)
-{
-    return g_pause_requested && !g_stop_requested;
-}
-
 static void playback_thread_func(void *arg)
 {
     int result;
 
     (void)arg;
-    g_playing = true;
-    g_stop_requested = false;
-    g_pause_requested = false;
+    audio_ctrl_on_playback_start();
     result = audio_play_file(g_play_path);
-    if (result != 0 && !g_stop_requested)
-        set_play_error(result);
-    else if (result == 0 && !g_paused)
-        clear_play_error();
-    if (!g_paused)
-        g_have_resume = false;
-    g_playing = false;
+    audio_ctrl_on_playback_end(result, audio_should_stop());
 }
 
 static int start_playback_thread(int keep_resume)
 {
-    if (!keep_resume)
-        g_have_resume = false;
-
-    g_stop_requested = false;
-    g_pause_requested = false;
+    audio_ctrl_prepare_async(keep_resume);
 
     if (!threadCreate(playback_thread_func, NULL, 0x8000, 0x30, -1, true))
         return -7;
@@ -171,9 +66,9 @@ static int start_playback_thread(int keep_resume)
 
 void audio_resume(void)
 {
-    if (!g_paused || g_playing)
+    if (!audio_is_paused() || audio_is_playing())
         return;
-    g_paused = false;
+    audio_ctrl_set_paused_flag(0);
     (void)start_playback_thread(1);
 }
 
@@ -182,74 +77,42 @@ int audio_play_file_async(const char *path)
     int r;
 
     if (!g_audio_initialized || !path) {
-        set_play_error(-1);
+        audio_set_play_error(-1);
         return -1;
     }
 
-    if (g_playing)
+    if (audio_is_playing())
         wait_playback_idle();
 
-    clear_play_error();
-    g_paused = false;
+    audio_clear_play_error();
+    audio_ctrl_set_paused_flag(0);
     strncpy(g_play_path, path, sizeof(g_play_path) - 1);
     g_play_path[sizeof(g_play_path) - 1] = '\0';
 
     r = start_playback_thread(0);
     if (r != 0)
-        set_play_error(r);
+        audio_set_play_error(r);
     return r;
-}
-
-int audio_is_playing(void)
-{
-    return g_playing;
-}
-
-int audio_is_paused(void)
-{
-    return g_paused && !g_playing;
 }
 
 static ndspWaveBuf g_waveBufs[N_WAVEBUFS];
 static int g_channel_used = -1;
-
-static int is_flac_path(const char *path)
-{
-    const char *dot = strrchr(path, '.');
-    return dot && (strcasecmp(dot, ".flac") == 0);
-}
-
-static int is_mp3_path(const char *path)
-{
-    const char *dot = strrchr(path, '.');
-    if (!dot)
-        return 0;
-    return strcasecmp(dot, ".mp3") == 0 || strcasecmp(dot, ".mp2") == 0;
-}
-
-static int is_flac_file(const char *path)
-{
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    char buf[4];
-    int ok = (fread(buf, 1, 4, f) == 4 && memcmp(buf, FLAC_MAGIC, 4) == 0);
-    fclose(f);
-    return ok;
-}
 
 int audio_play_file(const char *path)
 {
     if (!path || !g_audio_initialized)
         return -1;
 
-    if (is_flac_path(path) || is_flac_file(path))
+    switch (audio_route_for_path(path)) {
+    case AUDIO_ROUTE_FLAC:
         return audio_play_flac(path);
-
-    if (is_mp3_path(path))
+    case AUDIO_ROUTE_MP3:
         return audio_play_mp3(path);
+    default:
+        break;
+    }
 
-    g_stop_requested = false;
-    g_pause_requested = false;
+    audio_ctrl_clear_exit_flags();
 
     libstreamfile_t *libsf = libstreamfile_open_from_stdio(path);
     if (!libsf)

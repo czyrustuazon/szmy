@@ -1,11 +1,10 @@
 #pragma once
 
 #include <3ds.h>
+#include "music_paths.h"
 
-/* SD card path for Root:/music */
-#define MUSIC_DIR_FS    "sdmc:/music"
-#define MUSIC_DIR_LABEL "Root:/music"
-#define MUSIC_PATH_MAX  256
+/* Open a folder and scan entries. Returns 0 on success. */
+int musiclist_open(const char *dir);
 
 /* Open MUSIC_DIR_FS. Returns 0 on success, negative if the folder is missing. */
 int musiclist_init(void);

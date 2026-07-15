@@ -2,6 +2,29 @@
 .SUFFIXES:
 #---------------------------------------------------------------------------------
 
+# Host unit tests / coverage — also runs as a dependency of `make` / `make cia`.
+# Standalone: `make coverage`, `make coverage-html`, or `make test-host`
+# Bypass during a 3DS build: `make SKIP_COVERAGE=1` / `make cia SKIP_COVERAGE=1`
+.PHONY: coverage coverage-html test-host
+coverage:
+	@$(MAKE) -C $(CURDIR)/tests coverage
+
+coverage-html:
+	@$(MAKE) -C $(CURDIR)/tests coverage-html
+
+test-host:
+	@$(MAKE) -C $(CURDIR)/tests test
+
+# Load the 3DS toolchain only when building the app (default `make`, or any
+# non-host goal). Pure host goals skip this entirely.
+ifeq ($(MAKECMDGOALS),)
+NEED_3DS := 1
+else ifneq ($(filter-out coverage coverage-html test-host,$(MAKECMDGOALS)),)
+NEED_3DS := 1
+endif
+
+ifdef NEED_3DS
+
 ifeq ($(strip $(DEVKITARM)),)
 $(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to devkitARM>")
 endif
@@ -262,7 +285,9 @@ $(VGMSTREAM_LIB):
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds PORTLIBS_3DS="$(PORTLIBS_3DS)" ENABLE_MP3="$(ENABLE_MP3)"
 
 #---------------------------------------------------------------------------------
-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
+# Host coverage gate runs first so `make` / `make cia` fail fast if coverage < 100%.
+# Skip with: make SKIP_COVERAGE=1 …
+all: $(if $(SKIP_COVERAGE),,coverage) $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
@@ -379,4 +404,7 @@ botbuttons.o: play_active.bmp.o play_inactive.bmp.o pause_active.bmp.o pause_ina
 
 #---------------------------------------------------------------------------------
 endif
+#---------------------------------------------------------------------------------
+
+endif # NEED_3DS
 #---------------------------------------------------------------------------------

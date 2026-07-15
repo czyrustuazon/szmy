@@ -1,14 +1,19 @@
 /* FLAC playback via dr_flac with decode-ahead threading.
  * Decode runs on core 1 into a ring buffer; main thread feeds NDSP from the buffer. */
 
+#ifndef UNIT_TEST
 #define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_OGG
 #define DR_FLAC_NO_WCHAR
 #include "dr_flac.h"
+#else
+#include "host_drflac.h"
+#endif
 
 #include <3ds.h>
 #include <string.h>
 #include "audio.h"
+#include "pcm_ring.h"
 
 #define SAMPLES_PER_BUF  4096
 #define N_WAVEBUFS       4
@@ -16,6 +21,38 @@
 #define RING_BYTES       (384 * 1024)
 #define DECODE_STACK     0x8000
 #define PLAYBACK_YIELD_US  (8000)
+
+#ifdef UNIT_TEST
+/* Force decode_thread through the producer_full yield path N times. */
+static volatile int g_fake_producer_full;
+/* Keep decode in the while-loop until ring.stop / should_exit (for stop-branch coverage). */
+static volatile int g_force_decode_spin;
+static volatile int g_decode_in_loop;
+/* After N spin iterations, call audio_stop() while ring.stop is still false. */
+static volatile int g_spin_stop_after;
+static volatile int g_spin_iters;
+
+void flac_test_set_fake_producer_full(int times)
+{
+    g_fake_producer_full = times;
+}
+
+void flac_test_set_decode_spin(int spin)
+{
+    g_force_decode_spin = spin;
+    if (!spin) {
+        g_decode_in_loop   = 0;
+        g_spin_stop_after  = 0;
+        g_spin_iters       = 0;
+    }
+}
+
+void flac_test_set_decode_spin_stop_after(int iters)
+{
+    g_spin_stop_after = iters;
+    g_spin_iters      = 0;
+}
+#endif
 
 typedef struct {
     drflac *flac;
@@ -40,8 +77,27 @@ static void decode_thread(void *arg)
     }
 
     while (!r->stop && !audio_playback_should_exit()) {
-        size_t used = r->write_pos - r->read_pos;
-        if (used > r->ring_size - r->chunk_bytes) {
+#ifdef UNIT_TEST
+        if (g_force_decode_spin) {
+            g_decode_in_loop = 1;
+            if (g_spin_stop_after > 0 && ++g_spin_iters >= g_spin_stop_after) {
+                audio_stop(); /* should_exit while r->stop still false */
+                /* Recheck while immediately — don't sleep or main may set
+                 * ring.stop first and short-circuit past should_exit. */
+                continue;
+            }
+            svcSleepThread(100000);
+            continue;
+        }
+#endif
+        int full = pcm_ring_producer_full(r->write_pos, r->read_pos, r->ring_size, r->chunk_bytes);
+#ifdef UNIT_TEST
+        if (g_fake_producer_full > 0) {
+            g_fake_producer_full--;
+            full = 1;
+        }
+#endif
+        if (full) {
             /* Ring full, yield to let consumer drain */
             svcSleepThread(1000000); /* 1 ms */
             continue;
@@ -55,14 +111,7 @@ static void decode_thread(void *arg)
         }
 
         size_t to_write = (size_t)got * r->channels * sizeof(drflac_int16);
-        size_t w = r->write_pos % r->ring_size;
-        if (w + to_write <= r->ring_size) {
-            memcpy(r->ring + w, decode_buf, to_write);
-        } else {
-            size_t first = r->ring_size - w;
-            memcpy(r->ring + w, decode_buf, first);
-            memcpy(r->ring, (uint8_t *)decode_buf + first, to_write - first);
-        }
+        pcm_ring_write(r->ring, r->ring_size, r->write_pos, decode_buf, to_write);
         LightLock_Lock(&r->lock);
         r->write_pos += to_write;
         LightLock_Unlock(&r->lock);
@@ -123,6 +172,14 @@ int audio_play_flac(const char *path)
     void *bufs[N_WAVEBUFS];
     size_t buf_bytes = chunk_bytes;
 
+#ifdef UNIT_TEST
+    /* Let a spinning decode enter the while before we allocate / fail wavebufs. */
+    if (g_force_decode_spin) {
+        while (!g_decode_in_loop && !ring.decode_done)
+            svcSleepThread(100000);
+    }
+#endif
+
     for (int i = 0; i < N_WAVEBUFS; i++) {
         bufs[i] = linearAlloc(buf_bytes);
         if (!bufs[i]) {
@@ -140,12 +197,10 @@ int audio_play_flac(const char *path)
     }
 
     /* Pre-fill before first output; keep resume start short. */
-    size_t prefill = resuming ? (chunk_bytes * 2u) : (size_t)(sr * ch * 2);
-    if (prefill > ring.ring_size / 2)
-        prefill = ring.ring_size / 2;
+    size_t prefill = pcm_ring_prefill_target(resuming, chunk_bytes, sr, ch, ring.ring_size);
     while (!audio_playback_should_exit()) {
         LightLock_Lock(&ring.lock);
-        size_t avail = ring.write_pos - ring.read_pos;
+        size_t avail = pcm_ring_avail(ring.write_pos, ring.read_pos);
         LightLock_Unlock(&ring.lock);
         if (avail >= prefill || ring.decode_done)
             break;
@@ -161,17 +216,10 @@ int audio_play_flac(const char *path)
         ndspWaveBuf *wb = &waveBufs[next];
         if (wb->status == NDSP_WBUF_FREE || wb->status == NDSP_WBUF_DONE) {
             LightLock_Lock(&ring.lock);
-            size_t avail = ring.write_pos - ring.read_pos;
+            size_t avail = pcm_ring_avail(ring.write_pos, ring.read_pos);
             LightLock_Unlock(&ring.lock);
             if (avail >= chunk_bytes) {
-                size_t rp = ring.read_pos % ring.ring_size;
-                if (rp + chunk_bytes <= ring.ring_size) {
-                    memcpy(bufs[next], ring.ring + rp, chunk_bytes);
-                } else {
-                    size_t first = ring.ring_size - rp;
-                    memcpy(bufs[next], ring.ring + rp, first);
-                    memcpy((uint8_t *)bufs[next] + first, ring.ring, chunk_bytes - first);
-                }
+                pcm_ring_read(ring.ring, ring.ring_size, ring.read_pos, bufs[next], chunk_bytes);
                 LightLock_Lock(&ring.lock);
                 ring.read_pos += chunk_bytes;
                 LightLock_Unlock(&ring.lock);
@@ -183,19 +231,16 @@ int audio_play_flac(const char *path)
             } else if (ring.decode_done) {
                 /* Partial last chunk or exact end */
                 if (avail > 0) {
-                    size_t samples = avail / (ch * sizeof(drflac_int16));
-                    size_t to_copy = samples * ch * sizeof(drflac_int16);
-                    size_t rp = ring.read_pos % ring.ring_size;
-                    if (rp + to_copy <= ring.ring_size)
-                        memcpy(bufs[next], ring.ring + rp, to_copy);
-                    else {
-                        size_t first = ring.ring_size - rp;
-                        memcpy(bufs[next], ring.ring + rp, first);
-                        memcpy((uint8_t *)bufs[next] + first, ring.ring, to_copy - first);
-                    }
-                    memset((uint8_t *)bufs[next] + to_copy, 0, chunk_bytes - to_copy);
+                    size_t frame_bytes = ch * sizeof(drflac_int16);
+                    size_t samples;
+                    size_t rp_snap;
+
                     LightLock_Lock(&ring.lock);
-                    ring.read_pos += to_copy;
+                    rp_snap = ring.read_pos;
+                    samples = pcm_ring_pop_partial(
+                        ring.ring, ring.ring_size, ring.write_pos, &rp_snap,
+                        bufs[next], chunk_bytes, frame_bytes);
+                    ring.read_pos = rp_snap;
                     LightLock_Unlock(&ring.lock);
                     wb->nsamples = (u32)samples;
                     DSP_FlushDataCache(bufs[next], buf_bytes);
@@ -209,7 +254,7 @@ int audio_play_flac(const char *path)
             }
         } else {
             LightLock_Lock(&ring.lock);
-            size_t a = ring.write_pos - ring.read_pos;
+            size_t a = pcm_ring_avail(ring.write_pos, ring.read_pos);
             LightLock_Unlock(&ring.lock);
             if (ring.decode_done && a == 0)
                 stream_done = true;
