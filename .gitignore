@@ -8,6 +8,13 @@
 *.smdh
 *.map
 *.lst
+/banner.bin
+
+# Local bannertool binary / download leftovers (optional; not required in git)
+/tools/bannertool
+/tools/bannertool.exe
+/tools/bannertool-extract/
+/tools/*.zip
 
 # tex3ds leftovers sometimes written to the project root
 /top_screen_bg.d

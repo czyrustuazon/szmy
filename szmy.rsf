@@ -2,9 +2,10 @@
 # (Same content as former Mp3_Player.rsf; target name is now szmy. Edit BasicInfo/TitleInfo as you like.)
 
 BasicInfo:
-  Title                 : "Hello World"
+  Title                 : "SZMY Music Player"
   ProductCode           : CTR-P-HWLD
-  Logo                  : Nintendo
+  # Nintendo | Licensed | Distributed | iQue | iQueForSystem | Homebrew
+  Logo                  : Homebrew
 
 TitleInfo:
   Category              : Application

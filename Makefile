@@ -56,6 +56,7 @@ include $(DEVKITARM)/3ds_rules
 # APP_DESCRIPTION is the description of the app stored in the SMDH file (Optional)
 # APP_AUTHOR is the author of the app stored in the SMDH file (Optional)
 # ICON is the filename of the icon (.png), relative to the project folder.
+# BANNER_IMAGE / BANNER_AUDIO: Home Menu top-screen banner (256x128 PNG + WAV/OGG).
 #---------------------------------------------------------------------------------
 # Derive app basename: .../myproj (TARGET=myproj) or .../myproj/build in sub-make (still myproj, not "build")
 __HERE := $(notdir $(CURDIR))
@@ -71,9 +72,14 @@ INCLUDES := include
 GRAPHICS := gfx
 GFXBUILD := $(BUILD)
 
-APP_TITLE := Hello World
-APP_DESCRIPTION := 3DS Homebrew Hello World
-APP_AUTHOR := Developer
+APP_TITLE := SZMY Music Player
+APP_DESCRIPTION := Play MP3, FLAC, WAV, BRSTM and more from your SD card.
+APP_AUTHOR := CyT
+
+# Home Menu banner (top screen). Override: BANNER_IMAGE=... BANNER_AUDIO=...
+BANNER_IMAGE ?= banner.png
+BANNER_AUDIO ?= banner.wav
+BANNERTOOL ?=
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -303,18 +309,46 @@ endif
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
+# Banner: bannertool makebanner → banner.bin (requires tools/bannertool[.exe] or PATH)
+# Get Windows/Linux builds: https://github.com/carstene1ns/3ds-bannertool/releases
+#---------------------------------------------------------------------------------
+APP_BANNER := $(TOPDIR)/banner.bin
+
+define FIND_BANNERTOOL
+	bt="$(BANNERTOOL)"; \
+	if [ -z "$$bt" ]; then \
+		if [ -x "$(TOPDIR)/tools/bannertool.exe" ]; then bt="$(TOPDIR)/tools/bannertool.exe"; \
+		elif [ -x "$(TOPDIR)/tools/bannertool" ]; then bt="$(TOPDIR)/tools/bannertool"; \
+		elif command -v bannertool >/dev/null 2>&1; then bt="bannertool"; \
+		else \
+			echo "Error: bannertool not found."; \
+			echo "  Put bannertool in PATH, or at tools/bannertool.exe"; \
+			echo "  https://github.com/carstene1ns/3ds-bannertool/releases"; \
+			exit 1; \
+		fi; \
+	fi
+endef
+
+$(APP_BANNER): $(TOPDIR)/$(BANNER_IMAGE) $(TOPDIR)/$(BANNER_AUDIO)
+	@echo building banner.bin from $(BANNER_IMAGE)
+	@$(FIND_BANNERTOOL); \
+	"$$bt" makebanner -i "$(TOPDIR)/$(BANNER_IMAGE)" -a "$(TOPDIR)/$(BANNER_AUDIO)" -o "$(APP_BANNER)"
+
+#---------------------------------------------------------------------------------
 # CIA target: build installable .cia (install and launch from Home Menu for New3DS extended RAM)
 # Requires: makerom in PATH (e.g. from devkitPro buildtools or 3dstools)
 #---------------------------------------------------------------------------------
-cia: all
+cia: all $(APP_BANNER)
 	@echo building $(OUTPUT).cia
 	@echo "  RSF:  $(CIA_RSF)"
 	@echo "  elf:  $(OUTPUT).elf"
 	@echo "  icon: $(OUTPUT).smdh"
+	@echo "  banner: $(APP_BANNER)"
 	@test -f "$(CIA_RSF)" || ( echo "Error: RSF not found: $(CIA_RSF). Add it or set CIA_RSF=..." ; exit 1 )
 	@test -f "$(OUTPUT).elf" || ( echo "Error: no ELF. Run 'make' first." ; exit 1 )
 	@test -f "$(OUTPUT).smdh" || ( echo "Error: missing $(OUTPUT).smdh (run make without NO_SMDH, add icon)."; exit 1 )
-	@makerom -f cia -o $(OUTPUT).cia -rsf $(CIA_RSF) -target t -elf $(OUTPUT).elf -icon $(OUTPUT).smdh
+	@test -f "$(APP_BANNER)" || ( echo "Error: missing $(APP_BANNER)."; exit 1 )
+	@makerom -f cia -o $(OUTPUT).cia -rsf $(CIA_RSF) -target t -elf $(OUTPUT).elf -icon $(OUTPUT).smdh -banner $(APP_BANNER)
 	@echo built: $(OUTPUT).cia
 
 $(BUILD):
@@ -333,7 +367,7 @@ endif
 #---------------------------------------------------------------------------------
 clean: clean-vgmstream
 	@echo clean ...
-	@rm -fr $(BUILD) $(OUTPUT).3dsx $(OUTPUT).smdh $(OUTPUT).elf $(OUTPUT).cia $(GFXBUILD)
+	@rm -fr $(BUILD) $(OUTPUT).3dsx $(OUTPUT).smdh $(OUTPUT).elf $(OUTPUT).cia $(APP_BANNER) $(GFXBUILD)
 
 clean-vgmstream:
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds clean 2>/dev/null || true
