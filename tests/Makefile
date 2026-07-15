@@ -4,9 +4,19 @@
 PROJECT_ROOT := $(abspath ..)
 BUILD_DIR    := build
 REPORT_DIR   := coverage_html
-VGM_MINIMP3  := $(PROJECT_ROOT)/vgmstream-master/src/coding/libs
+VGM_MINIMP3  := $(PROJECT_ROOT)/vgmstream/src/coding/libs
 
-CC       ?= gcc
+# Parallel by default when invoked directly (inherits jobserver if parent used -j).
+JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+ifeq ($(filter -j%,$(MAKEFLAGS))$(filter --jobserver-%,$(MAKEFLAGS)),)
+MAKEFLAGS += -j$(JOBS)
+endif
+
+# Always use a native host compiler. Parent `make`/`make cia` exports
+# arm-none-eabi-gcc as CC; that must not win here.
+HOST_CC ?= gcc
+override CC := $(HOST_CC)
+
 CFLAGS   := -std=c11 -Wall -Wextra -Werror -g -O0 \
             -DUNIT_TEST \
             -Wno-format-truncation \

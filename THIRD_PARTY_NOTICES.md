@@ -33,11 +33,11 @@ Copyright (c) 2026 zaccken. Licensed under the zlib License. See `LICENSE`.
 ### vgmstream (libvgmstream)
 
 - **Use:** Decoding game and common audio formats (WAV, BRSTM, OGG, etc.)
-- **License:** ISC-style permissive license (see `vgmstream-master/COPYING`)
-- **Source:** https://github.com/vgmstream/vgmstream (vendored as `vgmstream-master/`)
+- **License:** ISC-style permissive license (see `vgmstream/COPYING`)
+- **Source:** https://github.com/vgmstream/vgmstream (vendored as `vgmstream/`)
 
   vgmstream incorporates code under other terms. Notable portions credited in
-  `vgmstream-master/COPYING` include work by Marko Kreen, jagarl, Nullsoft,
+  `vgmstream/COPYING` include work by Marko Kreen, jagarl, Nullsoft,
   Paul Hsieh, Leshade Entis, and Sun Microsystems (public domain).
 
 ### minimp3 (via vgmstream)
@@ -45,7 +45,7 @@ Copyright (c) 2026 zaccken. Licensed under the zlib License. See `LICENSE`.
 - **Use:** MP3 decode path (symbols linked from vgmstream’s minimp3 build)
 - **License:** CC0 1.0 Universal (public domain dedication)
 - **Source:** https://github.com/lieff/minimp3
-- **In tree:** `vgmstream-master/src/coding/libs/minimp3.h`
+- **In tree:** `vgmstream/src/coding/libs/minimp3.h`
 
 ### dr_flac
 

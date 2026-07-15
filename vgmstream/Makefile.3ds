@@ -1,0 +1,58 @@
+# Build libvgmstream.a for Nintendo 3DS (devkitARM).
+# Run from project root: make -C vgmstream -f Makefile.3ds
+# MP3: pass PORTLIBS_3DS and ENABLE_MP3=1 when libmpg123 is available (dkp-pacman -S 3ds-mpg123).
+
+ifeq ($(strip $(DEVKITARM)),)
+$(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to devkitARM>")
+endif
+
+TOPDIR ?= $(CURDIR)
+include $(DEVKITARM)/3ds_rules
+
+# Match main 3DS app ABI so lib links (VFP register arguments / hard-float).
+ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
+
+#---------------------------------------------------------------------------------
+VGM_SRCDIR := src
+VGM_ODIR   := build-3ds
+VGM_LIB    := $(VGM_ODIR)/libvgmstream.a
+
+# All C sources (no C++ in vgmstream core)
+VGM_CFILES := $(wildcard $(VGM_SRCDIR)/*.c) \
+	$(wildcard $(VGM_SRCDIR)/base/*.c) \
+	$(wildcard $(VGM_SRCDIR)/coding/*.c) \
+	$(wildcard $(VGM_SRCDIR)/coding/libs/*.c) \
+	$(wildcard $(VGM_SRCDIR)/layout/*.c) \
+	$(wildcard $(VGM_SRCDIR)/meta/*.c) \
+	$(wildcard $(VGM_SRCDIR)/util/*.c)
+
+VGM_OFILES := $(patsubst $(VGM_SRCDIR)/%.c,$(VGM_ODIR)/%.o,$(VGM_CFILES))
+
+# Same arch as main 3DS app. MP3 when ENABLE_MP3=1 and PORTLIBS_3DS set.
+# Suppress vgmstream warnings that are noisy on 3DS (int vs int32_t/uint32_t, unused helpers, truncation).
+VGM_CFLAGS := -g -Wall -O2 -mword-relocations -ffunction-sections $(ARCH) \
+	-I$(CURDIR)/$(VGM_SRCDIR) -D__3DS__ \
+	-Wno-unused-but-set-variable -Wno-unused-function -Wno-format-truncation
+ifneq ($(ENABLE_MP3),)
+  ifneq ($(PORTLIBS_3DS),)
+    VGM_CFLAGS += -DVGM_USE_MPEG -I$(PORTLIBS_3DS)/include
+  endif
+endif
+
+#---------------------------------------------------------------------------------
+.PHONY: all clean
+
+all: $(VGM_LIB)
+
+$(VGM_LIB): $(VGM_OFILES)
+	@echo archiving $@
+	@$(AR) rcs $@ $^
+
+$(VGM_ODIR)/%.o: $(VGM_SRCDIR)/%.c
+	@mkdir -p $(dir $@)
+	@echo compiling $(notdir $<)
+	@$(CC) $(VGM_CFLAGS) -c -o $@ $<
+
+clean:
+	@echo cleaning vgmstream 3DS build
+	@rm -rf $(VGM_ODIR)

@@ -53,7 +53,7 @@ make clean
 
 ## Audio (vgmstream + FLAC + optional MP3)
 
-- **vgmstream** is built from `vgmstream-master/` (3DS build: `make -C vgmstream-master -f Makefile.3ds`). Plugin/player code (winamp, xmplay, fb2k, audacious, cli) has been removed; only the core library is used.
+- **vgmstream** is built from `vgmstream/` (3DS build: `make -C vgmstream -f Makefile.3ds`). Plugin/player code (winamp, xmplay, fb2k, audacious, cli) has been removed; only the core library is used.
 - **FLAC** is supported via **dr_flac** (single-file decoder in `include/dr_flac.h`). Files whose path ends with `.flac` are decoded and played without vgmstream.
 - **MP3** is optional. Install libmpg123 for 3DS so `.mp3` files work: `dkp-pacman -S 3ds-mpg123` (or ensure `$(DEVKITPRO)/portlibs/3ds/lib/libmpg123.a` exists). Without it, the app still builds and plays WAV/FLAC/BRSTM/etc.
 - Playback uses **NDSP**. You need DSP firmware on the SD: place `dspfirm.cdc` at `sdmc:/3ds/dspfirm.cdc` (dump from a real 3DS or use a provided file from the community).
@@ -64,7 +64,7 @@ make clean
 
 - `source/` – C/C++ source (`main.c`, `audio.c`, `flac_player.c`)
 - `include/` – project headers (`audio.h`, `dr_flac.h`)
-- `vgmstream-master/` – vgmstream library (core only; plugins removed)
+- `vgmstream/` – vgmstream library (core only; plugins removed)
 - `data/` – binary data (included in the build)
 - `gfx/` – graphics (e.g. `.t3s` textures)
 - `Makefile` – devkitPro 3DS build rules (builds vgmstream then the app)

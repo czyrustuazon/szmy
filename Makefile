@@ -2,6 +2,12 @@
 .SUFFIXES:
 #---------------------------------------------------------------------------------
 
+# Parallel builds by default (override: make -j4 …  or  make JOBS=8 …)
+JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+ifeq ($(filter -j%,$(MAKEFLAGS))$(filter --jobserver-%,$(MAKEFLAGS)),)
+MAKEFLAGS += -j$(JOBS)
+endif
+
 # Host unit tests / coverage — also runs as a dependency of `make` / `make cia`.
 # Standalone: `make coverage`, `make coverage-html`, or `make test-host`
 # Bypass during a 3DS build: `make SKIP_COVERAGE=1` / `make cia SKIP_COVERAGE=1`
@@ -90,7 +96,7 @@ LIBS := -lvgmstream -lctru -lm
 #---------------------------------------------------------------------------------
 # vgmstream: multi-format audio decoding (WAV, BRSTM, ADPCM, etc.)
 #---------------------------------------------------------------------------------
-VGMSTREAM_DIR := $(TOPDIR)/vgmstream-master
+VGMSTREAM_DIR := $(TOPDIR)/vgmstream
 VGMSTREAM_LIB := $(VGMSTREAM_DIR)/build-3ds/libvgmstream.a
 
 #---------------------------------------------------------------------------------
@@ -207,8 +213,6 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(TOPDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean cia
-
 # 400x240 = top blit size; re-encode 24-bit BMP. Install: https://imagemagick.org/ (magick/convert in PATH) or: choco install imagemagick
 TOP_BG_SRC    := $(CURDIR)/gfx/top_screen_bg.bmp
 TOP_BG_EMBED  := $(CURDIR)/$(BUILD)/top_screen_bg_embed.bmp
@@ -285,9 +289,17 @@ $(VGMSTREAM_LIB):
 	@$(MAKE) -C $(VGMSTREAM_DIR) -f Makefile.3ds PORTLIBS_3DS="$(PORTLIBS_3DS)" ENABLE_MP3="$(ENABLE_MP3)"
 
 #---------------------------------------------------------------------------------
-# Host coverage gate runs first so `make` / `make cia` fail fast if coverage < 100%.
-# Skip with: make SKIP_COVERAGE=1 …
-all: $(if $(SKIP_COVERAGE),,coverage) $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
+# Coverage gate first (fail fast), then parallel 3DS build via MAKEFLAGS -j.
+# Skip coverage with: make SKIP_COVERAGE=1 …
+.PHONY: all 3ds-all clean cia
+
+all:
+ifndef SKIP_COVERAGE
+	@$(MAKE) -C $(CURDIR)/tests coverage
+endif
+	@$(MAKE) 3ds-all
+
+3ds-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
