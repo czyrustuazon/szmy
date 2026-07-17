@@ -16,6 +16,13 @@ int  audio_is_paused(void);
 
 int64_t audio_take_resume_sample(void);
 void    audio_note_paused_at(int64_t sample);
+void    audio_ctrl_set_resume_sample(int64_t sample);
+
+void    audio_ctrl_set_duration(int64_t samples);
+void    audio_ctrl_set_position(int64_t samples);
+int64_t audio_ctrl_duration_samples(void);
+int64_t audio_ctrl_position_samples(void);
+float   audio_progress_ratio(void);
 
 int  audio_last_play_error(void);
 void audio_set_play_error(int error);

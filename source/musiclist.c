@@ -11,6 +11,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #ifndef UNIT_TEST
 #include "topbg.h"
@@ -46,6 +47,9 @@ static char      s_paths[MUSICLIST_MAX][MUSIC_PATH_MAX];
 static EntryKind s_kinds[MUSICLIST_MAX];
 static int       s_count;
 static int       s_selected;
+static char      s_prompt[96];
+static char      s_prompt_help[64];
+static int       s_have_prompt;
 
 static void invalidate_draw(void)
 {
@@ -120,13 +124,15 @@ static int g_scan_inj_n;
 static int g_scan_inj_i;
 static int g_scan_inj_active;
 static int g_scan_cap;
+static int g_enter_fail_after;
 
 void musiclist_test_clear_scan_inject(void)
 {
-    g_scan_inj_n      = 0;
-    g_scan_inj_i      = 0;
-    g_scan_inj_active = 0;
-    g_scan_cap        = 0;
+    g_scan_inj_n        = 0;
+    g_scan_inj_i        = 0;
+    g_scan_inj_active   = 0;
+    g_scan_cap          = 0;
+    g_enter_fail_after  = 0;
 }
 
 void musiclist_test_add_scan_entry(const char *name, unsigned char d_type)
@@ -155,6 +161,11 @@ void musiclist_test_set_cwd_root(const char *cwd, const char *root)
         strncpy(s_root, root, MUSIC_PATH_MAX - 1);
         s_root[MUSIC_PATH_MAX - 1] = '\0';
     }
+}
+
+void musiclist_test_fail_enter_after(int n)
+{
+    g_enter_fail_after = n;
 }
 
 static struct dirent g_scan_inj_ent;
@@ -299,15 +310,284 @@ const char *musiclist_cwd(void)
     return s_cwd;
 }
 
+void musiclist_set_prompt(const char *msg, const char *help)
+{
+    if (msg == NULL || msg[0] == '\0') {
+        s_have_prompt   = 0;
+        s_prompt[0]     = '\0';
+        s_prompt_help[0] = '\0';
+        return;
+    }
+    strncpy(s_prompt, msg, sizeof(s_prompt) - 1);
+    s_prompt[sizeof(s_prompt) - 1] = '\0';
+    if (help != NULL && help[0] != '\0') {
+        strncpy(s_prompt_help, help, sizeof(s_prompt_help) - 1);
+        s_prompt_help[sizeof(s_prompt_help) - 1] = '\0';
+    } else {
+        strncpy(s_prompt_help, "A=yes  B=cancel", sizeof(s_prompt_help) - 1);
+        s_prompt_help[sizeof(s_prompt_help) - 1] = '\0';
+    }
+    s_have_prompt = 1;
+}
+
+int musiclist_delete_file(const char *path)
+{
+    int idx = -1;
+    int i;
+
+    if (path == NULL || path[0] == '\0')
+        return -1;
+
+    for (i = 0; i < s_count; i++) {
+        if (strcmp(s_paths[i], path) == 0) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (unlink(path) != 0)
+        return -1;
+
+    if (scan_cwd() != 0)
+        return -1;
+
+    if (s_count == 0)
+        s_selected = 0;
+    else if (idx < 0)
+        ;
+    else if (idx >= s_count)
+        s_selected = s_count - 1;
+    else
+        s_selected = idx;
+
+    return 0;
+}
+
+/* Defined below; used by cross-folder next/prev. */
+int musiclist_enter(void);
+int musiclist_go_back(void);
+
+static int index_of_path(const char *path)
+{
+    int i;
+
+    if (path == NULL)
+        return -1;
+    for (i = 0; i < s_count; i++) {
+        if (strcmp(s_paths[i], path) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* First playable file under cwd (dirs before files, depth-first). */
+static const char *first_file_in_cwd_recursive(void)
+{
+    int i;
+
+    for (i = 0; i < s_count; i++) {
+        if (s_kinds[i] == ENTRY_DIR) {
+            char left[MUSIC_PATH_MAX];
+
+            strncpy(left, s_paths[i], MUSIC_PATH_MAX - 1);
+            left[MUSIC_PATH_MAX - 1] = '\0';
+            s_selected = i;
+            if (musiclist_enter() != 0)
+                continue;
+            {
+                const char *f = first_file_in_cwd_recursive();
+                if (f != NULL)
+                    return f;
+            }
+            musiclist_go_back();
+            i = index_of_path(left);
+            continue;
+        }
+        if (s_kinds[i] == ENTRY_FILE) {
+            s_selected = i;
+            return s_paths[i];
+        }
+    }
+    return NULL;
+}
+
+/* Last playable file under cwd (depth-first). */
+static const char *last_file_in_cwd_recursive(void)
+{
+    int i;
+
+    for (i = s_count - 1; i >= 0; i--) {
+        if (s_kinds[i] == ENTRY_FILE) {
+            s_selected = i;
+            return s_paths[i];
+        }
+        if (s_kinds[i] == ENTRY_DIR) {
+            char left[MUSIC_PATH_MAX];
+
+            strncpy(left, s_paths[i], MUSIC_PATH_MAX - 1);
+            left[MUSIC_PATH_MAX - 1] = '\0';
+            s_selected = i;
+            if (musiclist_enter() != 0)
+                continue;
+            {
+                const char *f = last_file_in_cwd_recursive();
+                if (f != NULL)
+                    return f;
+            }
+            musiclist_go_back();
+            i = index_of_path(left);
+        }
+    }
+    return NULL;
+}
+
+/* Next playable after index `after` in the current folder listing. */
+static const char *next_after_index(int after)
+{
+    int i;
+
+    for (i = after + 1; i < s_count; i++) {
+        if (s_kinds[i] == ENTRY_FILE) {
+            s_selected = i;
+            return s_paths[i];
+        }
+        if (s_kinds[i] == ENTRY_DIR) {
+            char left[MUSIC_PATH_MAX];
+
+            strncpy(left, s_paths[i], MUSIC_PATH_MAX - 1);
+            left[MUSIC_PATH_MAX - 1] = '\0';
+            s_selected = i;
+            if (musiclist_enter() != 0)
+                continue;
+            {
+                const char *f = first_file_in_cwd_recursive();
+                if (f != NULL)
+                    return f;
+            }
+            musiclist_go_back();
+            i = index_of_path(left);
+        }
+    }
+    return NULL;
+}
+
+/* Previous playable before index `before` in the current folder listing. */
+static const char *prev_before_index(int before)
+{
+    int i;
+
+    for (i = before - 1; i >= 0; i--) {
+        if (s_kinds[i] == ENTRY_FILE) {
+            s_selected = i;
+            return s_paths[i];
+        }
+        if (s_kinds[i] == ENTRY_DIR) {
+            char left[MUSIC_PATH_MAX];
+
+            strncpy(left, s_paths[i], MUSIC_PATH_MAX - 1);
+            left[MUSIC_PATH_MAX - 1] = '\0';
+            s_selected = i;
+            if (musiclist_enter() != 0)
+                continue;
+            {
+                const char *f = last_file_in_cwd_recursive();
+                if (f != NULL)
+                    return f;
+            }
+            musiclist_go_back();
+            i = index_of_path(left);
+        }
+    }
+    return NULL;
+}
+
+const char *musiclist_next_file_after(const char *path)
+{
+    int         start = index_of_path(path);
+    const char *n;
+
+    if (start < 0)
+        start = s_selected;
+
+    n = next_after_index(start);
+    if (n != NULL)
+        return n;
+
+    /* End of folder: climb toward root and continue after the folder we left. */
+    while (strcmp(s_cwd, s_root) != 0) {
+        char left[MUSIC_PATH_MAX];
+        int  idx;
+
+        strncpy(left, s_cwd, MUSIC_PATH_MAX - 1);
+        left[MUSIC_PATH_MAX - 1] = '\0';
+        if (musiclist_go_back() != 0)
+            break;
+        idx = index_of_path(left);
+        if (idx < 0)
+            break;
+        n = next_after_index(idx);
+        if (n != NULL)
+            return n;
+    }
+    return NULL; /* no wrap at music root */
+}
+
+const char *musiclist_prev_file_before(const char *path)
+{
+    int         start = index_of_path(path);
+    const char *n;
+
+    if (start < 0)
+        start = s_selected;
+
+    n = prev_before_index(start);
+    if (n != NULL)
+        return n;
+
+    while (strcmp(s_cwd, s_root) != 0) {
+        char left[MUSIC_PATH_MAX];
+        int  idx;
+
+        strncpy(left, s_cwd, MUSIC_PATH_MAX - 1);
+        left[MUSIC_PATH_MAX - 1] = '\0';
+        if (musiclist_go_back() != 0)
+            break;
+        idx = index_of_path(left);
+        if (idx < 0)
+            break;
+        n = prev_before_index(idx);
+        if (n != NULL)
+            return n;
+    }
+    return NULL;
+}
+
 int musiclist_enter(void)
 {
+    char prev[MUSIC_PATH_MAX];
+
+#ifdef UNIT_TEST
+    if (g_enter_fail_after > 0) {
+        g_enter_fail_after--;
+        if (g_enter_fail_after == 0)
+            return -1;
+    }
+#endif
     if (s_count == 0 || s_kinds[s_selected] != ENTRY_DIR)
         return -1;
 
+    strncpy(prev, s_cwd, MUSIC_PATH_MAX - 1);
+    prev[MUSIC_PATH_MAX - 1] = '\0';
     strncpy(s_cwd, s_paths[s_selected], MUSIC_PATH_MAX - 1);
     s_cwd[MUSIC_PATH_MAX - 1] = '\0';
     s_selected = 0;
-    return scan_cwd();
+    if (scan_cwd() != 0) {
+        strncpy(s_cwd, prev, MUSIC_PATH_MAX - 1);
+        s_cwd[MUSIC_PATH_MAX - 1] = '\0';
+        (void)scan_cwd();
+        return -1;
+    }
+    return 0;
 }
 
 int musiclist_activate(void)
@@ -386,6 +666,11 @@ static void draw_status(int playing, int paused)
     const char *msg;
     u32         clr = CLR_NORMAL;
 
+    if (s_have_prompt) {
+        jptext_draw(JPTEXT_X, jptext_line_y(LINE_STATUS), CLR_SELECT, s_prompt);
+        return;
+    }
+
     if (err != 0) {
         msg = audio_error_message(err);
         snprintf(buf, sizeof(buf), "Error: %s (%d)", msg ? msg : "?", err);
@@ -405,6 +690,11 @@ static void draw_status(int playing, int paused)
 
 static void draw_help(void)
 {
+    if (s_have_prompt) {
+        jptext_draw(
+            JPTEXT_X, jptext_line_y(LINE_HELP), CLR_NORMAL, s_prompt_help);
+        return;
+    }
     jptext_draw(
         JPTEXT_X, jptext_line_y(LINE_HELP), CLR_NORMAL,
         "Up/Down=select  A=open/play  B=back  START=exit");

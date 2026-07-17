@@ -39,5 +39,18 @@ int musiclist_go_back(void);
 /* Current folder path (sdmc:/...). */
 const char *musiclist_cwd(void);
 
+/* Override status line (e.g. delete confirm). NULL clears.
+ * help may be NULL to use "A=yes  B=cancel". */
+void musiclist_set_prompt(const char *msg, const char *help);
+
+/* Delete a file on SD and refresh the current folder list. 0 = ok. */
+int musiclist_delete_file(const char *path);
+
+/* Select next/prev audio file after `path` (depth-first across folders).
+ * Climbs toward music root when a folder ends; does not wrap. Updates selection.
+ * NULL if none. */
+const char *musiclist_next_file_after(const char *path);
+const char *musiclist_prev_file_before(const char *path);
+
 /* Redraw the list on the top screen console. Pass playback state for the status line. */
 void musiclist_draw(PrintConsole *top, int playing, int paused);

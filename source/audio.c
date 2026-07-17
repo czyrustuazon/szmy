@@ -25,6 +25,12 @@ static void wait_playback_idle(void)
     audio_ctrl_after_stop_wait();
 }
 
+void audio_stop_wait(void)
+{
+    wait_playback_idle();
+    g_play_path[0] = '\0';
+}
+
 int audio_init(void)
 {
     if (g_audio_initialized)
@@ -72,6 +78,67 @@ void audio_resume(void)
     (void)start_playback_thread(1);
 }
 
+int audio_seek_ratio(float ratio)
+{
+    int64_t duration;
+    int64_t sample;
+    int     was_playing;
+    int     was_paused;
+
+    was_playing = audio_is_playing();
+    was_paused  = audio_is_paused();
+    if (!was_playing && !was_paused)
+        return -1;
+
+    duration = audio_ctrl_duration_samples();
+    if (duration <= 0)
+        return -1;
+
+    if (ratio < 0.f)
+        ratio = 0.f;
+    if (ratio > 1.f)
+        ratio = 1.f;
+
+    sample = (int64_t)((double)ratio * (double)duration);
+    if (sample < 0)
+        sample = 0;
+    if (sample > duration)
+        sample = duration;
+
+    if (was_playing) {
+        /* audio_stop() clears resume — apply seek target after the thread exits. */
+        audio_stop();
+        while (audio_is_playing())
+            svcSleepThread(100000);
+        audio_ctrl_after_seek_restart();
+        audio_ctrl_set_resume_sample(sample);
+        if (start_playback_thread(1) != 0)
+            return -1;
+        return 0;
+    }
+
+    /* Paused: update resume only; stay paused. */
+    audio_ctrl_set_resume_sample(sample);
+    audio_ctrl_set_paused_flag(1);
+    return 0;
+}
+
+const char *audio_current_path(void)
+{
+    if (g_play_path[0] == '\0')
+        return NULL;
+    if (!audio_is_playing() && !audio_is_paused())
+        return NULL;
+    return g_play_path;
+}
+
+const char *audio_last_path(void)
+{
+    if (g_play_path[0] == '\0')
+        return NULL;
+    return g_play_path;
+}
+
 int audio_play_file_async(const char *path)
 {
     int r;
@@ -86,6 +153,7 @@ int audio_play_file_async(const char *path)
 
     audio_clear_play_error();
     audio_ctrl_set_paused_flag(0);
+    audio_ctrl_clear_timeline();
     strncpy(g_play_path, path, sizeof(g_play_path) - 1);
     g_play_path[sizeof(g_play_path) - 1] = '\0';
 
@@ -127,8 +195,10 @@ int audio_play_file(const char *path)
 
     {
         int64_t resume = audio_take_resume_sample();
-        if (resume >= 0)
+        if (resume >= 0) {
             libvgmstream_seek(vg, resume);
+            audio_ctrl_set_position(resume);
+        }
     }
 
     const libvgmstream_format_t *fmt = vg->format;
@@ -137,6 +207,13 @@ int audio_play_file(const char *path)
     if (ch < 1 || ch > 2 || sr < 300 || sr > 48000) {
         libvgmstream_free(vg);
         return -4;
+    }
+
+    {
+        int64_t dur = fmt->play_samples;
+        if (dur <= 0)
+            dur = fmt->stream_samples;
+        audio_ctrl_set_duration(dur);
     }
 
     int ndsp_format = (ch == 2) ? NDSP_FORMAT_STEREO_PCM16 : NDSP_FORMAT_MONO_PCM16;
@@ -185,6 +262,7 @@ int audio_play_file(const char *path)
                     ndspChnWaveBufAdd(channel_id, wb);
                     next_buf = (next_buf + 1) % N_WAVEBUFS;
                     progressed = true;
+                    audio_ctrl_set_position(libvgmstream_get_play_position(vg));
                 }
             }
         }

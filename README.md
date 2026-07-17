@@ -1,48 +1,65 @@
 # 3DS Homebrew – szmy (multi-format audio)
 
-A Nintendo 3DS homebrew app using **devkitPro**, **libctru**, and **vgmstream** for multi-format audio playback.  
-Supports **WAV, BRSTM, ADPCM, and many other formats** via vgmstream (no optional codec libs; built-in decoders only).  
-Press **A** to play `sdmc:/music.wav` (or any supported file at that path); **START** to exit.
+A Nintendo 3DS homebrew music player using **devkitPro**, **libctru**, and **vgmstream**.  
+Supports **WAV, FLAC, MP3** (optional), **BRSTM/BCSTM/BFSTM**, ADPCM, and other formats vgmstream can decode with built-in codecs.
 
 ## Requirements
 
-- [devkitPro](https://devkitpro.org/) with **devkitARM** and **3DS tools** installed
-- On Windows: use the devkitPro shell (or ensure `make` and `DEVKITARM` are in your PATH)
+- [devkitPro](https://devkitpro.org/) with **devkitARM** and **3DS tools**
+- On Windows: use the **devkitPro MSYS2** shell (so `make` and `DEVKITARM` are set)
+- Host toolchain for unit tests / coverage gate: **gcc**, **make**, **lcov**  
+  (`pacman -S --needed gcc make lcov` in the same MSYS shell)
 
 ## Build
 
-1. Set the environment (if not already set by the devkitPro shell):
-   - **Windows:** `set DEVKITARM=C:\devkitPro\devkitARM`
+1. Set the environment if needed:
+   - **Windows (MSYS):** usually already set by the devkitPro shell  
    - **Linux/macOS:** `export DEVKITARM=/opt/devkitPro/devkitARM`
 
-2. From the project root, run:
+2. From the project root:
+
    ```bash
    make
    ```
 
-3. Output (names match the project folder / `TARGET`, e.g. **szmy**):
-   - `szmy.3dsx` – homebrew executable (run via 3DS homebrew launcher)
-   - `szmy.smdh` – icon/metadata
+   By default this:
+
+   1. Runs the **host unit tests + coverage gate** (must be **100%** line and function coverage on tested production sources)
+   2. Builds the 3DS app in parallel (`-j` defaults to all CPU cores)
+
+3. Outputs (names follow the project folder / `TARGET`, e.g. **szmy**):
+
+   - `szmy.3dsx` – homebrew launcher executable
+   - `szmy.smdh` – icon / metadata
    - `szmy.elf` – ELF for debugging
+
+### Useful overrides
+
+| Command | Effect |
+|---------|--------|
+| `make SKIP_COVERAGE=1` | Skip host tests; 3DS build only (faster local iterate) |
+| `make -j4` / `make JOBS=8` | Cap parallel jobs |
+| `make test-host` | Run host tests only (no coverage report / gate) |
+| `make coverage` | Host tests + coverage gate (no HTML) |
+| `make coverage-html` | Same as coverage, then write `tests/coverage_html/index.html` |
 
 ## Build CIA (installable, more RAM on New 3DS)
 
-To build an installable `.cia` (e.g. for **~124 MB** RAM on New 3DS when launched from the Home Menu):
+Installable `.cia` for launching from the **Home Menu** (larger New 3DS memory mode):
 
-1. Ensure **makerom** is in your PATH. It is **not** in devkitPro pacman. Get it by:
-   - **Prebuilt (Windows):** Download from [Project_CTR releases](https://github.com/3DSGuy/Project_CTR/releases) (look for makerom in the release assets) or from [GBAtemp](https://gbatemp.net/download/project_ctr-ctrtool-makerom-win64-source.35067/) (Win64 build). Put `makerom.exe` in a folder that’s on your PATH (e.g. `C:\devkitPro\tools\bin`) or run `make cia` from the same folder.
-   - **Build from source:** Clone [3DSGuy/Project_CTR](https://github.com/3DSGuy/Project_CTR), open the `makerom` folder, and build with make (see the repo’s README). Requires a C++ build environment (e.g. MSYS2 with gcc, or Visual Studio).
-2. Run:
-   ```bash
-   make cia
-   ```
-3. You get `szmy.cia` (if the project folder is `szmy`). Install it with FBI or similar, then **launch from the Home Menu** (not from the homebrew launcher) to use the extended memory.
+1. **makerom** on `PATH` (not in default devkitPro pacman). Get a build from [Project_CTR releases](https://github.com/3DSGuy/Project_CTR/releases) or build from source.
+2. **bannertool** for `banner.bin` (see Makefile comments / [3ds-bannertool releases](https://github.com/carstene1ns/3ds-bannertool/releases)).
+3. Root **`szmy.rsf`** with your New3DS `SystemModeExt` (e.g. `124MB` or `178MB`).
 
-Add **`szmy.rsf`** in the project root (Rom Specification) with **New3DS SystemModeExt: 124MB** (or your choice). For **178 MB** instead, edit the RSF and set `SystemModeExt : 178MB`.
+```bash
+make cia
+```
+
+Same coverage gate as `make` unless you pass `SKIP_COVERAGE=1`. Install with FBI (or similar), then **launch from the Home Menu**.
 
 ## Run on 3DS
 
-- Copy `szmy.3dsx` (and optionally `szmy.smdh` in the same folder) to your SD card, e.g. in `sd:/3ds/`.
+- Copy `szmy.3dsx` (and optionally `szmy.smdh`) to the SD card, e.g. `sd:/3ds/`.
 - Launch from the homebrew launcher (e.g. Luma3DS + Homebrew Menu).
 
 ## Clean
@@ -51,47 +68,40 @@ Add **`szmy.rsf`** in the project root (Rom Specification) with **New3DS SystemM
 make clean
 ```
 
+## Host unit tests
+
+Pure logic and control-plane code is extracted into host-testable modules and exercised with **Unity** + **gcov/lcov** under `tests/`. See **[tests/README.md](tests/README.md)** for the module list, mocks, and how to add coverage.
+
+`make` / `make cia` fail if line or function coverage of those modules drops below 100%. Branch coverage is reported but not gated.
+
 ## Audio (vgmstream + FLAC + optional MP3)
 
-- **vgmstream** is built from `vgmstream/` (3DS build: `make -C vgmstream -f Makefile.3ds`). Plugin/player code (winamp, xmplay, fb2k, audacious, cli) has been removed; only the core library is used.
-- **FLAC** is supported via **dr_flac** (single-file decoder in `include/dr_flac.h`). Files whose path ends with `.flac` are decoded and played without vgmstream.
-- **MP3** is optional. Install libmpg123 for 3DS so `.mp3` files work: `dkp-pacman -S 3ds-mpg123` (or ensure `$(DEVKITPRO)/portlibs/3ds/lib/libmpg123.a` exists). Without it, the app still builds and plays WAV/FLAC/BRSTM/etc.
-- Playback uses **NDSP**. You need DSP firmware on the SD: place `dspfirm.cdc` at `sdmc:/3ds/dspfirm.cdc` (dump from a real 3DS or use a provided file from the community).
-- **File name/path:** Any path is fine (e.g. `sdmc:/music.wav`, `sdmc:/track.flac`, `sdmc:/song.mp3`). Format is detected from content or extension (`.flac` uses dr_flac; others use vgmstream).
-- **Supported formats:** WAV, FLAC, BRSTM, BCSTM, BFSTM, many ADPCM variants, and (if libmpg123 is installed) MP3, plus other formats vgmstream supports with built-in codecs.
+- **vgmstream** is built from `vgmstream-master/` (`make -C vgmstream-master -f Makefile.3ds`). Core library only.
+- **FLAC** via **dr_flac** (`include/dr_flac.h`) for `.flac` paths.
+- **MP3** optional: `dkp-pacman -S 3ds-mpg123` (needs `$(DEVKITPRO)/portlibs/3ds/lib/libmpg123.a`). Without it, the app still builds for other formats.
+- Playback uses **NDSP**. Place DSP firmware at `sdmc:/3ds/dspfirm.cdc`.
+- Format is detected from content / extension (`.flac` → dr_flac; others → vgmstream / MP3 path as configured).
 
 ## Project layout
 
-- `source/` – C/C++ source (`main.c`, `audio.c`, `flac_player.c`)
-- `include/` – project headers (`audio.h`, `dr_flac.h`)
-- `vgmstream/` – vgmstream library (core only; plugins removed)
-- `data/` – binary data (included in the build)
-- `gfx/` – graphics (e.g. `.t3s` textures)
-- `Makefile` – devkitPro 3DS build rules (builds vgmstream then the app)
-- `szmy.rsf` – Rom Specification File for `make cia` (add yourself; New3DS extended memory when configured there)
+| Path | Role |
+|------|------|
+| `source/` | App C sources |
+| `include/` | Headers |
+| `tests/` | Host Unity tests, fixtures, coverage |
+| `vgmstream-master/` | vgmstream core (3DS build under `build-3ds/`) |
+| `gfx/` | Bitmaps / textures |
+| `data/` | Embedded binary data |
+| `Makefile` | 3DS build + coverage gate |
+| `szmy.rsf` | CIA Rom Specification |
+
+Build products (`build/`, `*.3dsx` / `*.cia` / `*.elf` / `*.smdh`, `tests/build/`, coverage HTML, gcov data) are gitignored.
 
 ## New 3DS: why only ~128 MB?
 
-On New 3DS XL the system has **256 MB** RAM, but when you run homebrew from the **Homebrew Launcher** (hbmenu), your app only gets **~128 MB**. That’s not a bug:
-
-- The launcher runs in **Legacy** mode (Old 3DS layout). The kernel only gives your process the old 128 MB linear region; the other 128 MB is reserved for the system or not mapped for your process.
-- **You cannot change this from inside your app.** The memory layout is fixed when the process is created; there is no API to “unlock” more RAM at runtime.
-- Even in the best case (see below), **apps never get the full 256 MB**. The rest is used by the OS and services.
-
-### Getting more than 128 MB (optional)
-
-To get a **larger** app memory region (still not 256 MB):
-
-1. **Build a CIA** and install it, then **launch from the Home Menu** (not from hbmenu). The system then uses your title’s **exheader** to decide memory mode.
-2. In the exheader, set **New3DS system mode** (Flag2) to request more RAM, e.g.:
-   - **Prod (1):** ~124 MB for your app  
-   - **Dev1 (2):** ~178 MB for your app  
-   See [NCCH/Extended Header](https://www.3dbrew.org/wiki/NCCH/Extended_Header) (Flag2, New3DS system mode).
-The **`make cia`** target uses `szmy.rsf` (i.e. `$(TARGET).rsf`) and New3DS settings from that file (see Build CIA above).
-
-So: **from 3dsx launched by hbmenu you cannot “force” access to the rest of the 256 MB**; the only way to get more is to run as a CIA from the Home Menu with an exheader that requests a larger New3DS memory mode.
+From the **Homebrew Launcher**, apps get the legacy **~128 MB** region. You cannot unlock more from inside the process. For a larger region, build a **CIA**, install it, and launch from the **Home Menu** with New3DS mode set in `szmy.rsf` / exheader (e.g. ~124 MB or ~178 MB). See [NCCH/Extended Header](https://www.3dbrew.org/wiki/NCCH/Extended_Header).
 
 ## Customize
 
-- **App name/icon:** Edit `APP_TITLE`, `APP_DESCRIPTION`, `APP_AUTHOR` in the Makefile. Add `icon.png` (48×48) in the project root for a custom icon.
-- **Target name:** Change `TARGET` in the Makefile (default is the folder name).
+- **App name/icon:** `APP_TITLE`, `APP_DESCRIPTION`, `APP_AUTHOR` in the Makefile; optional root `icon.png` (48×48).
+- **Target name:** `TARGET` in the Makefile (defaults to the folder name).

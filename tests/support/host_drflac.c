@@ -12,7 +12,7 @@ static drflac *host_flac_new(unsigned ch, unsigned sr, drflac_uint64 total)
         return NULL;
     f->channels    = ch;
     f->sampleRate  = sr;
-    f->totalFrames = total;
+    f->totalPCMFrameCount = total;
     return f;
 }
 
@@ -78,14 +78,14 @@ drflac_uint64 drflac_read_pcm_frames_s16(drflac *flac, drflac_uint64 frames, drf
     if (!flac || flac->closed || !buffer || frames == 0)
         return 0;
 
-    left = flac->totalFrames - flac->framesRead;
+    left = flac->totalPCMFrameCount - flac->framesRead;
     if (frames > left)
         frames = left;
     if (frames == 0)
         return 0;
 
     /* Throttle long fixtures so playback waits for data (avail < chunk). */
-    if (flac->totalFrames >= 60000u && frames > 1024u) {
+    if (flac->totalPCMFrameCount >= 60000u && frames > 1024u) {
         frames = 1024u;
         svcSleepThread(2000000);
     }
@@ -99,7 +99,7 @@ drflac_uint64 drflac_read_pcm_frames_s16(drflac *flac, drflac_uint64 frames, drf
 
 int drflac_seek_to_pcm_frame(drflac *flac, drflac_uint64 frame)
 {
-    if (!flac || frame > flac->totalFrames)
+    if (!flac || frame > flac->totalPCMFrameCount)
         return 0;
     flac->framesRead = frame;
     return 1;

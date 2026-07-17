@@ -1,4 +1,5 @@
 #include "unity.h"
+#include "audio.h"
 #include "audio_ctrl.h"
 #include "audio_ctrl_internal.h"
 
@@ -226,6 +227,138 @@ static void test_is_paused_false_while_still_playing(void)
     TEST_ASSERT_FALSE(audio_is_paused());
 }
 
+/* --- Natural end / auto-advance flag --- */
+
+static void test_ended_naturally_happy_consume(void)
+{
+    /* Happy: track finishes → flag set → consume once → clear */
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+    audio_ctrl_on_playback_start();
+    audio_ctrl_on_playback_end(0, 0);
+    TEST_ASSERT_TRUE(audio_consume_ended_naturally());
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+}
+
+static void test_ended_naturally_sad_stop_pause_error(void)
+{
+    /* Sad: stop does not count as natural end */
+    audio_ctrl_on_playback_start();
+    audio_stop();
+    audio_ctrl_on_playback_end(0, 1);
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+
+    /* Sad: pause end does not count */
+    audio_ctrl_reset();
+    audio_ctrl_on_playback_start();
+    audio_ctrl_set_paused_flag(1);
+    audio_ctrl_on_playback_end(0, 0);
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+
+    /* Sad: error end does not count */
+    audio_ctrl_reset();
+    audio_ctrl_on_playback_start();
+    audio_ctrl_on_playback_end(-3, 0);
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+}
+
+static void test_ended_naturally_cleared_on_start_stop_wait(void)
+{
+    /* Flag set then cleared by a new start */
+    audio_ctrl_on_playback_start();
+    audio_ctrl_on_playback_end(0, 0);
+    audio_ctrl_on_playback_start();
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+
+    /* Flag cleared by stop */
+    audio_ctrl_on_playback_start();
+    audio_ctrl_on_playback_end(0, 0);
+    audio_stop();
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+
+    /* Flag cleared by after_stop_wait */
+    audio_ctrl_reset();
+    audio_ctrl_on_playback_start();
+    audio_ctrl_on_playback_end(0, 0);
+    audio_ctrl_after_stop_wait();
+    TEST_ASSERT_FALSE(audio_consume_ended_naturally());
+}
+
+/* --- Duration / position / seek timeline --- */
+
+static void test_duration_position_and_progress_ratio(void)
+{
+    TEST_ASSERT_EQUAL_INT64(0, audio_ctrl_duration_samples());
+    TEST_ASSERT_EQUAL_INT64(0, audio_ctrl_position_samples());
+    TEST_ASSERT_EQUAL_FLOAT(0.f, audio_progress_ratio());
+
+    audio_ctrl_set_duration(-10);
+    TEST_ASSERT_EQUAL_INT64(0, audio_ctrl_duration_samples());
+    TEST_ASSERT_EQUAL_FLOAT(0.f, audio_progress_ratio());
+
+    audio_ctrl_set_duration(1000);
+    TEST_ASSERT_EQUAL_INT64(1000, audio_ctrl_duration_samples());
+    TEST_ASSERT_EQUAL_FLOAT(0.f, audio_progress_ratio()); /* position still 0 */
+
+    audio_ctrl_set_position(-5);
+    TEST_ASSERT_EQUAL_INT64(0, audio_ctrl_position_samples());
+    TEST_ASSERT_EQUAL_FLOAT(0.f, audio_progress_ratio());
+
+    audio_ctrl_set_position(250);
+    TEST_ASSERT_EQUAL_INT64(250, audio_ctrl_position_samples());
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.25f, audio_progress_ratio());
+
+    audio_ctrl_set_position(2000); /* clamp to duration */
+    TEST_ASSERT_EQUAL_INT64(1000, audio_ctrl_position_samples());
+    TEST_ASSERT_EQUAL_FLOAT(1.f, audio_progress_ratio());
+
+    audio_ctrl_clear_timeline();
+    TEST_ASSERT_EQUAL_INT64(0, audio_ctrl_duration_samples());
+    TEST_ASSERT_EQUAL_INT64(0, audio_ctrl_position_samples());
+}
+
+static void test_set_resume_sample_sets_position(void)
+{
+    audio_ctrl_set_duration(5000);
+    audio_ctrl_set_resume_sample(-3);
+    TEST_ASSERT_EQUAL_INT64(0, audio_ctrl_position_samples());
+    TEST_ASSERT_EQUAL_INT64(0, audio_take_resume_sample());
+
+    audio_ctrl_set_resume_sample(1234);
+    TEST_ASSERT_EQUAL_INT64(1234, audio_ctrl_position_samples());
+    TEST_ASSERT_EQUAL_INT64(1234, audio_take_resume_sample());
+    TEST_ASSERT_EQUAL_INT64(-1, audio_take_resume_sample());
+}
+
+static void test_after_seek_restart_preserves_resume_and_timeline(void)
+{
+    /* Unlike after_stop_wait, seek restart must not drop resume/timeline.
+     * (audio_stop clears resume; seek re-applies it after this helper.) */
+    audio_ctrl_set_duration(9000);
+    audio_ctrl_set_resume_sample(4500);
+    audio_ctrl_test_set_paused(1);
+    audio_ctrl_test_set_request_flags(1, 1);
+
+    audio_ctrl_after_seek_restart();
+
+    TEST_ASSERT_FALSE(audio_should_stop());
+    TEST_ASSERT_FALSE(audio_playback_should_exit());
+    TEST_ASSERT_FALSE(audio_is_paused());
+    TEST_ASSERT_EQUAL_INT64(9000, audio_ctrl_duration_samples());
+    TEST_ASSERT_EQUAL_INT64(4500, audio_ctrl_position_samples());
+    TEST_ASSERT_EQUAL_INT64(4500, audio_take_resume_sample());
+}
+
+static void test_natural_end_snaps_position_to_duration(void)
+{
+    audio_ctrl_set_duration(800);
+    audio_ctrl_set_position(100);
+    audio_ctrl_on_playback_start();
+    audio_ctrl_on_playback_end(0, 0);
+    TEST_ASSERT_EQUAL_INT64(800, audio_ctrl_position_samples());
+    TEST_ASSERT_EQUAL_FLOAT(1.f, audio_progress_ratio());
+    TEST_ASSERT_TRUE(audio_consume_ended_naturally());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -249,5 +382,12 @@ int main(void)
     RUN_TEST(test_clear_exit_flags);
     RUN_TEST(test_end_is_pause_false_when_also_stopped);
     RUN_TEST(test_is_paused_false_while_still_playing);
+    RUN_TEST(test_ended_naturally_happy_consume);
+    RUN_TEST(test_ended_naturally_sad_stop_pause_error);
+    RUN_TEST(test_ended_naturally_cleared_on_start_stop_wait);
+    RUN_TEST(test_duration_position_and_progress_ratio);
+    RUN_TEST(test_set_resume_sample_sets_position);
+    RUN_TEST(test_after_seek_restart_preserves_resume_and_timeline);
+    RUN_TEST(test_natural_end_snaps_position_to_duration);
     return UNITY_END();
 }

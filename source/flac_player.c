@@ -13,6 +13,7 @@
 #include <3ds.h>
 #include <string.h>
 #include "audio.h"
+#include "audio_ctrl.h"
 #include "pcm_ring.h"
 
 #define SAMPLES_PER_BUF  4096
@@ -127,8 +128,10 @@ int audio_play_flac(const char *path)
 
     int64_t resume = audio_take_resume_sample();
     int resuming = (resume >= 0);
-    if (resuming)
+    if (resuming) {
         drflac_seek_to_pcm_frame(flac, (drflac_uint64)resume);
+        audio_ctrl_set_position(resume);
+    }
 
     unsigned int ch = flac->channels;
     unsigned int sr = flac->sampleRate;
@@ -136,6 +139,8 @@ int audio_play_flac(const char *path)
         drflac_close(flac);
         return -2;
     }
+
+    audio_ctrl_set_duration((int64_t)flac->totalPCMFrameCount);
 
     size_t chunk_bytes = SAMPLES_PER_BUF * ch * sizeof(drflac_int16);
 
@@ -209,7 +214,7 @@ int audio_play_flac(const char *path)
 
     int next = 0;
     bool stream_done = false;
-    uint64_t samples_fed = 0;
+    uint64_t samples_fed = resuming ? (uint64_t)resume : 0;
     int pausing = 0;
 
     while (!stream_done && !audio_playback_should_exit()) {
@@ -227,6 +232,7 @@ int audio_play_flac(const char *path)
                 DSP_FlushDataCache(bufs[next], buf_bytes);
                 ndspChnWaveBufAdd(channel_id, wb);
                 samples_fed += SAMPLES_PER_BUF;
+                audio_ctrl_set_position((int64_t)samples_fed);
                 next = (next + 1) % N_WAVEBUFS;
             } else if (ring.decode_done) {
                 /* Partial last chunk or exact end */
@@ -246,6 +252,7 @@ int audio_play_flac(const char *path)
                     DSP_FlushDataCache(bufs[next], buf_bytes);
                     ndspChnWaveBufAdd(channel_id, wb);
                     samples_fed += samples;
+                    audio_ctrl_set_position((int64_t)samples_fed);
                     next = (next + 1) % N_WAVEBUFS;
                 }
                 stream_done = true;

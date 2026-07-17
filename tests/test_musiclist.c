@@ -372,6 +372,424 @@ static void test_go_back_path_edges(void)
     rmdir(root);
 }
 
+/* --- prompt / delete / next-prev --- */
+
+static void test_set_prompt_happy_and_clear(void)
+{
+    /* Happy: set with custom help, default help, then clear */
+    musiclist_set_prompt("Delete current track?", "A=yes  B=no");
+    musiclist_set_prompt("Are you sure?", NULL); /* default help */
+    musiclist_set_prompt("Again", "");           /* empty help → default */
+    musiclist_set_prompt(NULL, NULL);            /* clear */
+    musiclist_set_prompt("", "ignored");         /* empty msg clears */
+}
+
+static void test_next_prev_file_happy_and_sad(void)
+{
+    const char *alpha;
+    const char *zebra;
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    /* order: rock (dir), alpha.flac, zebra.wav */
+    musiclist_select_next(); /* alpha */
+    alpha = musiclist_selected_path();
+    TEST_ASSERT_NOT_NULL(strstr(alpha, "alpha.flac"));
+
+    /* Happy: next file after alpha is zebra */
+    zebra = musiclist_next_file_after(alpha);
+    TEST_ASSERT_NOT_NULL(zebra);
+    TEST_ASSERT_NOT_NULL(strstr(zebra, "zebra.wav"));
+
+    /* Sad: no wrap past last file */
+    TEST_ASSERT_NULL(musiclist_next_file_after(zebra));
+
+    /* Happy: prev from zebra → alpha */
+    TEST_ASSERT_NOT_NULL(strstr(musiclist_prev_file_before(zebra), "alpha.flac"));
+
+    /* Sad: prev from first file skips dir → NULL */
+    TEST_ASSERT_NULL(musiclist_prev_file_before(alpha));
+
+    /* Sad: unknown / NULL path falls back to selection (on last file → next NULL) */
+    musiclist_next_file_after(alpha); /* select zebra */
+    TEST_ASSERT_NULL(musiclist_next_file_after("/no/such/path.mp3"));
+    TEST_ASSERT_NULL(musiclist_next_file_after(NULL));
+
+    /* Sad: NULL path on prev uses selection (L394) */
+    musiclist_prev_file_before(zebra); /* alpha selected */
+    TEST_ASSERT_NULL(musiclist_prev_file_before(NULL));
+
+    /* Happy: from a directory path, next lands on first following file
+     * (empty rock/ is skipped → alpha.flac). */
+    {
+        const char *rock;
+        musiclist_exit();
+        TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+        rock = musiclist_selected_path();
+        TEST_ASSERT_TRUE(musiclist_selected_is_dir());
+        TEST_ASSERT_NOT_NULL(strstr(musiclist_next_file_after(rock), "alpha.flac"));
+    }
+
+    musiclist_exit();
+    rm_tree();
+}
+
+static void test_next_crosses_into_parent(void)
+{
+    char f[300];
+    char empty[300];
+    char deep[300];
+    FILE *fp;
+    const char *next;
+    const char *prev;
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    snprintf(f, sizeof(f), "%s/rock/beat.mp3", g_root);
+    fp = fopen(f, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+
+    /* Nested folder under rock for first/last deep recursion */
+    snprintf(deep, sizeof(deep), "%s/rock/deep", g_root);
+    TEST_ASSERT_EQUAL(0, mkdir(deep, 0755));
+    snprintf(f, sizeof(f), "%s/rock/deep/nested.mp3", g_root);
+    fp = fopen(f, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    /* Empty child before deep — first_file skips it */
+    snprintf(empty, sizeof(empty), "%s/rock/aaaempty", g_root);
+    TEST_ASSERT_EQUAL(0, mkdir(empty, 0755));
+
+    /* Empty sibling before jazz — skipped when walking forward */
+    snprintf(empty, sizeof(empty), "%s/empty", g_root);
+    TEST_ASSERT_EQUAL(0, mkdir(empty, 0755));
+    snprintf(empty, sizeof(empty), "%s/emutz", g_root); /* second empty */
+    TEST_ASSERT_EQUAL(0, mkdir(empty, 0755));
+
+    /* Empty child after deep — last_file tries it first when beat is gone */
+    snprintf(empty, sizeof(empty), "%s/rock/zzzempty", g_root);
+    TEST_ASSERT_EQUAL(0, mkdir(empty, 0755));
+
+    /* Second album after empty — entered when next leaves rock */
+    {
+        char jazz[300];
+        snprintf(jazz, sizeof(jazz), "%s/jazz", g_root);
+        TEST_ASSERT_EQUAL(0, mkdir(jazz, 0755));
+        snprintf(f, sizeof(f), "%s/jazz/swing.mp3", g_root);
+        fp = fopen(f, "wb");
+        TEST_ASSERT_NOT_NULL(fp);
+        fclose(fp);
+    }
+
+    /* order: empty, jazz, rock, alpha, zebra — dirs alpha-sorted */
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+
+    /* Happy: next from empty dir skips it and enters jazz */
+    {
+        const char *empty_path = musiclist_selected_path();
+        TEST_ASSERT_NOT_NULL(strstr(empty_path, "empty"));
+        next = musiclist_next_file_after(empty_path);
+        TEST_ASSERT_NOT_NULL(strstr(next, "swing.mp3"));
+        TEST_ASSERT_NOT_NULL(strstr(musiclist_cwd(), "jazz"));
+    }
+
+    /* Happy: climb out of jazz → continue into rock (nested first) */
+    next = musiclist_next_file_after(next);
+    TEST_ASSERT_NOT_NULL(strstr(next, "nested.mp3"));
+    TEST_ASSERT_NOT_NULL(strstr(musiclist_cwd(), "deep"));
+
+    /* Happy: next file in rock after nested is beat.mp3 */
+    next = musiclist_next_file_after(next);
+    TEST_ASSERT_NOT_NULL(strstr(next, "beat.mp3"));
+
+    /* Happy: last file in rock subtree → root files after rock */
+    next = musiclist_next_file_after(next);
+    TEST_ASSERT_NOT_NULL(strstr(next, "alpha.flac"));
+    TEST_ASSERT_EQUAL_STRING(g_root, musiclist_cwd());
+
+    /* Happy: prev from root file re-enters rock → last file (beat) */
+    prev = musiclist_prev_file_before(next);
+    TEST_ASSERT_NOT_NULL(strstr(prev, "beat.mp3"));
+
+    /* Happy: prev into nested last via last_file_in_cwd_recursive dirs */
+    prev = musiclist_prev_file_before(prev);
+    TEST_ASSERT_NOT_NULL(strstr(prev, "nested.mp3"));
+
+    /* last_file dir-only: rock without beat → descends into deep */
+    snprintf(f, sizeof(f), "%s/rock/beat.mp3", g_root);
+    unlink(f);
+    musiclist_exit();
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    musiclist_select_next();
+    musiclist_select_next();
+    musiclist_select_next(); /* toward alpha */
+    while (musiclist_selected_is_dir())
+        musiclist_select_next();
+    prev = musiclist_prev_file_before(musiclist_selected_path());
+    TEST_ASSERT_NOT_NULL(strstr(prev, "nested.mp3"));
+
+    /* Prev climb hit: earlier folder's last file */
+    {
+        char side[300];
+        snprintf(side, sizeof(side), "%s/aaa", g_root);
+        TEST_ASSERT_EQUAL(0, mkdir(side, 0755));
+        snprintf(f, sizeof(f), "%s/aaa/first.mp3", g_root);
+        fp = fopen(f, "wb");
+        TEST_ASSERT_NOT_NULL(fp);
+        fclose(fp);
+    }
+    musiclist_exit();
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    while (!musiclist_selected_path()
+           || strstr(musiclist_selected_path(), "jazz") == NULL)
+        musiclist_select_next();
+    TEST_ASSERT_EQUAL(0, musiclist_enter());
+    prev = musiclist_prev_file_before(musiclist_play_path());
+    TEST_ASSERT_NOT_NULL(prev);
+    TEST_ASSERT_NOT_NULL(strstr(prev, "first.mp3"));
+
+    musiclist_exit();
+    rm_tree();
+}
+
+static void test_prev_climbs_to_parent(void)
+{
+    char f[300];
+    FILE *fp;
+    const char *only;
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    snprintf(f, sizeof(f), "%s/rock/only.mp3", g_root);
+    fp = fopen(f, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    TEST_ASSERT_EQUAL(0, musiclist_enter()); /* rock first */
+    only = musiclist_play_path();
+    TEST_ASSERT_NOT_NULL(strstr(only, "only.mp3"));
+
+    /* First track in first folder — prev climbs, nothing before rock */
+    TEST_ASSERT_NULL(musiclist_prev_file_before(only));
+    TEST_ASSERT_EQUAL_STRING(g_root, musiclist_cwd());
+
+    musiclist_exit();
+    rm_tree();
+}
+
+static void test_next_prev_climb_edge_hooks(void)
+{
+    char ghost[300];
+    const char *zebra;
+    const char *alpha;
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    musiclist_select_next();
+    musiclist_select_next(); /* zebra — last file */
+    zebra = musiclist_selected_path();
+    TEST_ASSERT_NOT_NULL(strstr(zebra, "zebra.wav"));
+
+    /* go_back fails mid-climb (cwd has no slash) */
+    musiclist_test_set_cwd_root("noslash", "otherroot");
+    TEST_ASSERT_NULL(musiclist_next_file_after(zebra));
+
+    /* Climb with a cwd not present in the parent listing → idx < 0 */
+    musiclist_exit();
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    musiclist_select_next();
+    musiclist_select_next();
+    zebra = musiclist_selected_path();
+    snprintf(ghost, sizeof(ghost), "%s/ghost", g_root);
+    musiclist_test_set_cwd_root(ghost, g_root);
+    TEST_ASSERT_NULL(musiclist_next_file_after(zebra));
+
+    /* Prev climb: first file in subfolder, then break go_back */
+    musiclist_exit();
+    {
+        char f[300];
+        FILE *fp;
+        snprintf(f, sizeof(f), "%s/rock/only.mp3", g_root);
+        fp = fopen(f, "wb");
+        TEST_ASSERT_NOT_NULL(fp);
+        fclose(fp);
+    }
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    TEST_ASSERT_EQUAL(0, musiclist_enter());
+    alpha = musiclist_play_path();
+    musiclist_test_set_cwd_root("noslash", "otherroot");
+    TEST_ASSERT_NULL(musiclist_prev_file_before(alpha));
+
+    /* Prev climb: idx < 0 after go_back */
+    musiclist_exit();
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    TEST_ASSERT_EQUAL(0, musiclist_enter());
+    alpha = musiclist_play_path();
+    snprintf(ghost, sizeof(ghost), "%s/ghost", g_root);
+    /* Pretend we are in a ghost child of rock */
+    {
+        char nested_ghost[300];
+        snprintf(nested_ghost, sizeof(nested_ghost), "%s/ghost", musiclist_cwd());
+        musiclist_test_set_cwd_root(nested_ghost, g_root);
+    }
+    TEST_ASSERT_NULL(musiclist_prev_file_before(alpha));
+
+    musiclist_exit();
+    rm_tree();
+}
+
+static void test_next_skips_unopenable_dir(void)
+{
+    char empty[256];
+    char *p;
+    const char *ghost;
+    const char *next;
+
+    strcpy(empty, "/tmp/szmy_ml_ghost_XXXXXX");
+    p = mkdtemp(empty);
+    TEST_ASSERT_NOT_NULL(p);
+
+    /* ghost dir is injected but not on disk — enter fails, skip to file */
+    musiclist_test_add_scan_entry("ghost", DT_DIR);
+    musiclist_test_add_scan_entry("real", DT_DIR);
+    musiclist_test_add_scan_entry("ok.mp3", DT_REG);
+    TEST_ASSERT_EQUAL(0, musiclist_open(empty));
+    ghost = musiclist_selected_path();
+    TEST_ASSERT_NOT_NULL(strstr(ghost, "ghost"));
+
+    /* real/ also missing — enter fails; ok.mp3 follows dirs in sort order */
+    next = musiclist_next_file_after(ghost);
+    TEST_ASSERT_NOT_NULL(next);
+    TEST_ASSERT_NOT_NULL(strstr(next, "ok.mp3"));
+
+    /* Prev over an unopenable dir skips it */
+    TEST_ASSERT_NULL(musiclist_prev_file_before(next));
+
+    musiclist_exit();
+    rmdir(empty);
+}
+
+static void test_last_file_skips_unopenable_dir(void)
+{
+    char root[256];
+    char pack[300];
+    char sub[300];
+    char f[300];
+    char *p;
+    FILE *fp;
+    const char *prev;
+
+    void musiclist_test_fail_enter_after(int n);
+
+    strcpy(root, "/tmp/szmy_ml_lfu_XXXXXX");
+    p = mkdtemp(root);
+    TEST_ASSERT_NOT_NULL(p);
+    snprintf(pack, sizeof(pack), "%s/pack", p);
+    snprintf(sub, sizeof(sub), "%s/pack/sub", p);
+    TEST_ASSERT_EQUAL(0, mkdir(pack, 0755));
+    TEST_ASSERT_EQUAL(0, mkdir(sub, 0755));
+    /* Extra empty dir so last_file tries more than one directory */
+    snprintf(f, sizeof(f), "%s/pack/zzzempty", p);
+    TEST_ASSERT_EQUAL(0, mkdir(f, 0755));
+    snprintf(f, sizeof(f), "%s/pack/sub/deep.mp3", p);
+    fp = fopen(f, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    snprintf(f, sizeof(f), "%s/z.mp3", p);
+    fp = fopen(f, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+
+    TEST_ASSERT_EQUAL(0, musiclist_open(p));
+    while (!musiclist_selected_path()
+           || strstr(musiclist_selected_path(), "z.mp3") == NULL)
+        musiclist_select_next();
+    /* 1st enter = pack (ok), 2nd = zzzempty inside last_file (fail) */
+    musiclist_test_fail_enter_after(2);
+    prev = musiclist_prev_file_before(musiclist_selected_path());
+    TEST_ASSERT_NOT_NULL(prev);
+    TEST_ASSERT_NOT_NULL(strstr(prev, "deep.mp3"));
+
+    musiclist_exit();
+    snprintf(f, sizeof(f), "rm -rf '%s'", p);
+    (void)system(f);
+}
+
+static void test_delete_file_happy_and_sad(void)
+{
+    char orphan[300];
+    char only_dir[256];
+    char *p;
+    const char *path;
+    int count_before;
+    FILE *fp;
+
+    /* Sad: null / empty */
+    TEST_ASSERT_EQUAL(-1, musiclist_delete_file(NULL));
+    TEST_ASSERT_EQUAL(-1, musiclist_delete_file(""));
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    count_before = musiclist_count();
+
+    /* Sad: unlink fails */
+    TEST_ASSERT_EQUAL(-1, musiclist_delete_file("/tmp/szmy_does_not_exist_zzzz.wav"));
+
+    /* Happy: delete mid-list file (idx stays valid → s_selected = idx) */
+    musiclist_select_next(); /* alpha */
+    path = musiclist_selected_path();
+    TEST_ASSERT_NOT_NULL(strstr(path, "alpha.flac"));
+    TEST_ASSERT_EQUAL(0, musiclist_delete_file(path));
+    TEST_ASSERT_EQUAL(count_before - 1, musiclist_count());
+
+    /* Happy: delete last listed audio (idx >= s_count after rescan) */
+    musiclist_select_next(); /* toward zebra; skip dir if needed */
+    while (musiclist_selected_is_dir())
+        musiclist_select_next();
+    path = musiclist_selected_path();
+    TEST_ASSERT_NOT_NULL(strstr(path, "zebra.wav"));
+    TEST_ASSERT_EQUAL(0, musiclist_delete_file(path));
+    TEST_ASSERT_EQUAL(count_before - 2, musiclist_count());
+
+    /* Happy: orphan file not in list (idx < 0) */
+    snprintf(orphan, sizeof(orphan), "%s/orphan_only.wav", g_root);
+    fp = fopen(orphan, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    TEST_ASSERT_EQUAL(0, musiclist_delete_file(orphan));
+
+    /* Sad: scan_cwd fails after unlink */
+    snprintf(orphan, sizeof(orphan), "%s/last_kill.wav", g_root);
+    fp = fopen(orphan, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    {
+        char ghost_cwd[300];
+        snprintf(ghost_cwd, sizeof(ghost_cwd), "%s/missing_subdir", g_root);
+        musiclist_test_set_cwd_root(ghost_cwd, g_root);
+        TEST_ASSERT_EQUAL(-1, musiclist_delete_file(orphan));
+    }
+
+    musiclist_exit();
+    rm_tree();
+
+    /* Happy: deleting the only entry leaves s_count == 0 */
+    strcpy(only_dir, "/tmp/szmy_ml_one_XXXXXX");
+    p = mkdtemp(only_dir);
+    TEST_ASSERT_NOT_NULL(p);
+    snprintf(orphan, sizeof(orphan), "%s/solo.mp3", p);
+    fp = fopen(orphan, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    TEST_ASSERT_EQUAL(0, musiclist_open(p));
+    TEST_ASSERT_EQUAL(1, musiclist_count());
+    TEST_ASSERT_EQUAL(0, musiclist_delete_file(musiclist_selected_path()));
+    TEST_ASSERT_EQUAL(0, musiclist_count());
+    musiclist_exit();
+    rmdir(p);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -396,5 +814,13 @@ int main(void)
     RUN_TEST(test_enter_rejects_file);
     RUN_TEST(test_activate_file_and_failed_enter);
     RUN_TEST(test_go_back_path_edges);
+    RUN_TEST(test_set_prompt_happy_and_clear);
+    RUN_TEST(test_next_prev_file_happy_and_sad);
+    RUN_TEST(test_next_crosses_into_parent);
+    RUN_TEST(test_prev_climbs_to_parent);
+    RUN_TEST(test_next_prev_climb_edge_hooks);
+    RUN_TEST(test_next_skips_unopenable_dir);
+    RUN_TEST(test_last_file_skips_unopenable_dir);
+    RUN_TEST(test_delete_file_happy_and_sad);
     return UNITY_END();
 }

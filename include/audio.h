@@ -49,6 +49,24 @@ int audio_is_playing(void);
 /* True if playback is paused and can be resumed. */
 int audio_is_paused(void);
 
+/* Path of the track currently playing or paused, or NULL if idle. */
+const char *audio_current_path(void);
+
+/* Last requested play path (still set after a natural end). */
+const char *audio_last_path(void);
+
+/* True once when a track finished on its own (not stop/pause). Consumes the flag. */
+int audio_consume_ended_naturally(void);
+
+/* Seek to ratio in [0,1] of the current track. 0 = ok, negative = idle/unknown length. */
+int audio_seek_ratio(float ratio);
+
+/* Current playback progress in [0,1], or 0 if duration is unknown. */
+float audio_progress_ratio(void);
+
+/* Stop playback and wait until the file handle is released. */
+void audio_stop_wait(void);
+
 /* Resume sample for next play (-1 = from start). Used internally by playback. */
 int64_t audio_take_resume_sample(void);
 

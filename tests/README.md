@@ -1,8 +1,31 @@
 # Host unit tests (szmy)
 
-Desktop-side tests for **pure logic and control-plane code** extracted from the 3DS app.
+Desktop-side tests for **pure logic and control-plane code** extracted from the 3DS app.  
+Stack: **Unity**, host **gcc**, **gcov/lcov**. Tests run on MSYS2 / Linux / macOS — not on device.
 
-## What is covered (8 source files)
+## Commands (from repo root)
+
+| Command | What it does |
+|---------|----------------|
+| `make` / `make cia` | Runs coverage gate, then builds the 3DS app / CIA |
+| `make coverage` | Host tests + **100%** line & function coverage gate (no HTML) |
+| `make coverage-html` | Same, then writes `tests/coverage_html/index.html` |
+| `make test-host` | Compile and run tests only (no lcov gate) |
+| `make SKIP_COVERAGE=1` | Skip the gate for a faster 3DS-only build |
+
+From `tests/`:
+
+```bash
+make test          # run all runners
+make coverage      # clean rebuild + gate
+make coverage-html # gate + HTML report
+```
+
+Requires: `gcc`, `make`, `lcov` (e.g. `pacman -S --needed gcc make lcov` in the devkitPro MSYS shell).
+
+Parallel jobs are on by default (`nproc`). Override with `make -j4` or `make JOBS=8`.
+
+## What is covered
 
 | Module | File | How tested |
 |--------|------|------------|
@@ -14,70 +37,63 @@ Desktop-side tests for **pure logic and control-plane code** extracted from the 
 | Pause/stop/resume state | `source/audio_ctrl.c` | Direct API calls (no NDSP) |
 | FLAC magic / route pick | `source/file_magic.c` | Real temp files |
 | PCM ring buffer | `source/pcm_ring.c` | Synthetic byte patterns (wrap, partial drain) |
-| MP3 player | `source/mp3_player.c` | Real `fixtures/mini.mp3` + **host NDSP/thread mocks** |
+| Music browser logic | `source/musiclist.c` | Real temp directories (`mkdtemp`) |
+| MP3 player | `source/mp3_player.c` | `fixtures/mini.mp3` + **host NDSP/thread mocks** |
 | FLAC player | `source/flac_player.c` | **Host dr_flac stub** + NDSP/thread mocks |
-| Music browser logic | `source/musiclist.c` | **Real temp directories** (`mkdtemp`) |
 
-**60 tests** across 11 runners. Run `make coverage` → `coverage_html/index.html`.
+**~157 tests** across **11 runners**. The coverage gate requires **100% line and function** coverage on these production sources (branch coverage is reported, not gated). Test / Unity / minimp3 paths are stripped from the lcov report.
 
 ## What is *not* covered (and why)
 
 | File | Reason |
 |------|--------|
 | `main.c` | Full app entry, APT loop |
-| `audio.c` (playback loop) | NDSP + vgmstream + threads (not yet host-mocked) |
-| `botbuttons.c` (frame loop) | Touch/GFX — BMP helpers in `bmp_util.c` |
+| `audio.c` (vgmstream playback) | NDSP + vgmstream + threads (not host-mocked yet) |
+| `botbuttons.c` (frame loop) | Touch/GFX — BMP helpers live in `bmp_util.c` |
 | `jptext.c`, `topfont.c`, `topbg.c` | GPU / citro3d |
+
+Host tests do **not** replace on-device checks for DSP timing, GPU, or real SDMC behaviour.
 
 ## Host mocks (`tests/support/`)
 
 | File | Role |
 |------|------|
-| `3ds.h` | Stub libctru types (Thread, NDSP, linearAlloc, …) |
-| `host_mocks.c` | pthread threads, malloc alloc, **PCM capture sink** (counts samples in `ndspChnWaveBufAdd`) |
-| `host_drflac.c` | Fake `drflac_*` for FLAC player tests (`HOST_FLAC_FIXTURE` path) |
+| `3ds.h` | Stub libctru types (Thread, NDSP, `linearAlloc`, …) |
+| `host_mocks.c` | pthread threads, malloc alloc, **PCM capture sink** |
+| `host_drflac.c` | Fake `drflac_*` for FLAC player control-flow tests |
+| `dirent_compat.h` | `DT_*` helpers for directory scanning tests |
 
-MP3 tests use **real minimp3** decode on `fixtures/mini.mp3`. FLAC tests use the dr_flac stub (not the full `dr_flac.h` implementation) so playback logic is exercised without a binary FLAC fixture.
+MP3 tests use **real minimp3** decode on `fixtures/mini.mp3`. FLAC tests use the stub decoder so playback logic is exercised without a binary FLAC fixture.
 
 ## Are mocked tests valid?
-
-**It depends what you mock.**
 
 | Approach | Valid for | Not valid for |
 |----------|-----------|---------------|
 | **Extract pure functions** (preferred) | Logic, parsing, state machines | Whether NDSP actually outputs sound |
-| **Real OS services** (temp dirs, files) | `musiclist` scan/sort/nav, FLAC magic read | SDMC paths on device |
-| **Stub platform APIs** (fake `threadCreate`, NDSP) | *Your* code paths that call them | libctru / DSP firmware behaviour |
-| **Full hardware mock** | Rarely worth it on 3DS homebrew | End-to-end audio/video |
+| **Real OS services** (temp dirs, files) | `musiclist` scan/sort/nav, magic reads | Exact SDMC paths on device |
+| **Stub platform APIs** | *Your* code paths that call them | libctru / DSP firmware behaviour |
 
-**Rule of thumb:** tests prove **your branching and data handling** are correct. They do **not** replace on-device testing for timing, DSP, and GPU.
-
-Most tests here use **no mocks** — only extracted C and the real host filesystem.
-
-## Quick start
-
-```bash
-pacman -S --needed gcc make lcov   # devkitPro MSYS shell
-cd /c/Users/Zepse/Documents/szmy/tests
-make test
-make coverage
-```
-
-See earlier sections in git history for Ubuntu/macOS/full MSYS2 notes.
+**Rule of thumb:** tests prove branching and data handling in *your* code. Prefer extraction over mocks; use real files/dirs when possible.
 
 ## Layout
 
 ```
 tests/
-  Makefile              -DUNIT_TEST, --coverage
-  test_*.c
-  support/3ds.h         stub (unused when musiclist skips draw)
-  support/dirent_compat.h
-  third_party/unity/
+  Makefile              host gcc, -DUNIT_TEST, --coverage, coverage gate
+  test_*.c              Unity runners
+  fixtures/             tiny media used by player / magic tests
+  support/              3ds.h stubs, host_mocks, host_drflac
+  third_party/unity/    Unity framework
+  scripts/coverage.sh   optional: coverage-html + open report
+  build/                (gitignored) binaries + .gcda/.gcno
+  coverage_html/        (gitignored) optional HTML report
 ```
+
+The tests Makefile **forces a native host `gcc`**, even when a parent `make cia` has exported `arm-none-eabi-gcc` as `CC`.
 
 ## Adding coverage
 
-1. Move testable logic out of 3DS-tied files into `source/*.c`.
-2. Add `tests/test_<name>.c` and list it in `TEST_RUNNERS`.
-3. Prefer extraction over mocks; use real files/dirs when possible.
+1. Move testable logic out of 3DS-tied files into `source/*.c` + `include/*.h`.
+2. Add `tests/test_<name>.c` and list the runner in `TEST_RUNNERS` in `tests/Makefile`.
+3. Prefer extraction over new `UNIT_TEST` inject hooks; assert behaviour, not just “touch this line.”
+4. Run `make coverage` from the repo root and keep the gate green.

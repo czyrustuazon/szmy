@@ -177,11 +177,9 @@ export OFILES_BIN := $(addsuffix .o,$(BINFILES)) \
 	$(PICAFILES:.v.pica=.shbin.o) $(SHLISTFILES:.shlist=.shbin.o) \
 	$(addsuffix .o,$(T3XFILES))
 
-# Embedded top BG: 400x240 rescaled in build/ (keeps .cia small). Source: gfx/top_screen_bg.bmp
-# Bottom: play/pause (process rules below -> build/*.bmp, then bin2o)
-export GFX_EMBED      := top_screen_bg_embed.bmp.o
-export BTN_BMP_O      := play_active.bmp.o play_inactive.bmp.o pause_active.bmp.o pause_inactive.bmp.o
-export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES) $(GFX_EMBED) $(BTN_BMP_O)
+# Embedded top BG: 400x240 from root up.png. Bottom: 320x240 from root bottom.png.
+export GFX_EMBED      := top_screen_bg_embed.bmp.o bottom_screen_bg_embed.bmp.o
+export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES) $(GFX_EMBED)
 
 export HFILES := $(PICAFILES:.v.pica=_shbin.h) $(SHLISTFILES:.shlist=_shbin.h) \
 	$(addsuffix .h,$(subst .,_,$(BINFILES))) \
@@ -219,12 +217,14 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(TOPDIR)/$(ROMFS)
 endif
 
-# 400x240 = top blit size; re-encode 24-bit BMP. Install: https://imagemagick.org/ (magick/convert in PATH) or: choco install imagemagick
-TOP_BG_SRC    := $(CURDIR)/gfx/top_screen_bg.bmp
+# 400x240 = top (up.png); 320x240 = bottom (bottom.png).
+TOP_BG_SRC    := $(CURDIR)/up.png
 TOP_BG_EMBED  := $(CURDIR)/$(BUILD)/top_screen_bg_embed.bmp
+BOT_BG_SRC    := $(CURDIR)/bottom-clean.png
+BOT_BG_EMBED  := $(CURDIR)/$(BUILD)/bottom_screen_bg_embed.bmp
 
 $(TOP_BG_EMBED): $(TOP_BG_SRC) | $(BUILD)
-	@echo top_screen_bg: build embed 400x240 for smaller binary ...
+	@echo top_screen_bg: build embed 400x240 from up.png ...
 	@out="$(TOP_BG_EMBED)"; \
 	if command -v magick >/dev/null 2>&1; then \
 		magick "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
@@ -236,9 +236,35 @@ $(TOP_BG_EMBED): $(TOP_BG_SRC) | $(BUILD)
 			|| convert "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP:$$out" 2>/dev/null \
 			|| convert "$<" -strip -resize 400x240\! "$$out"; \
 		echo "  (ImageMagick -> $$out)"; \
+	elif command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then \
+		py=python3; command -v python3 >/dev/null 2>&1 || py=python; \
+		$$py -c "from PIL import Image; Image.open(r'$<').convert('RGB').resize((400,240)).save(r'$$out','BMP')"; \
+		echo "  (Pillow -> $$out)"; \
 	else \
-		echo "  (no magick/convert: copying full gfx/top_screen_bg.bmp — install ImageMagick to reduce .cia/rom size)" >&2; \
-		cp -f "$<" "$$out"; \
+		echo "  (no converter: using gfx/top_screen_bg.bmp fallback)" >&2; \
+		cp -f "$(CURDIR)/gfx/top_screen_bg.bmp" "$$out"; \
+	fi
+
+$(BOT_BG_EMBED): $(BOT_BG_SRC) | $(BUILD)
+	@echo bottom_screen_bg: build embed 320x240 from bottom-clean.png ...
+	@out="$(BOT_BG_EMBED)"; \
+	if command -v magick >/dev/null 2>&1; then \
+		magick "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
+			|| magick "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP:$$out" 2>/dev/null \
+			|| magick "$<" -strip -resize 320x240\! "$$out"; \
+		echo "  (ImageMagick -> $$out)"; \
+	elif command -v convert >/dev/null 2>&1; then \
+		convert "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
+			|| convert "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP:$$out" 2>/dev/null \
+			|| convert "$<" -strip -resize 320x240\! "$$out"; \
+		echo "  (ImageMagick -> $$out)"; \
+	elif command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then \
+		py=python3; command -v python3 >/dev/null 2>&1 || py=python; \
+		$$py -c "from PIL import Image; Image.open(r'$<').convert('RGB').resize((320,240)).save(r'$$out','BMP')"; \
+		echo "  (Pillow -> $$out)"; \
+	else \
+		echo "  (no converter: using gfx/bottom_screen_bg.bmp fallback)" >&2; \
+		cp -f "$(CURDIR)/gfx/bottom_screen_bg.bmp" "$$out"; \
 	fi
 
 # Bottom play/pause: 1% black transparent, trim, cap 32px, tile 32x32 BMP4 (half of prior 64).
@@ -305,7 +331,7 @@ ifndef SKIP_COVERAGE
 endif
 	@$(MAKE) 3ds-all
 
-3ds-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
+3ds-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BOT_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
@@ -405,6 +431,10 @@ top_screen_bg_embed.bmp.o: top_screen_bg_embed.bmp
 	@echo $(notdir $<)
 	@$(bin2o)
 
+bottom_screen_bg_embed.bmp.o: bottom_screen_bg_embed.bmp
+	@echo $(notdir $<)
+	@$(bin2o)
+
 topbg.o: top_screen_bg_embed.bmp.o top_screen_bg.t3x.o
 
 #---------------------------------------------------------------------------------
@@ -424,7 +454,7 @@ pause_inactive.bmp.o: pause_inactive.bmp
 	@echo $(notdir $<)
 	@$(bin2o)
 
-botbuttons.o: play_active.bmp.o play_inactive.bmp.o pause_active.bmp.o pause_inactive.bmp.o
+botbuttons.o: bottom_screen_bg_embed.bmp.o
 
 #---------------------------------------------------------------------------------
 %.bin.o %_bin.h : %.bin

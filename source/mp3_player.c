@@ -13,6 +13,7 @@
 #include <string.h>
 #include <strings.h>
 #include "audio.h"
+#include "audio_ctrl.h"
 #include "id3_util.h"
 #include "pcm_ring.h"
 
@@ -209,7 +210,8 @@ static uint8_t *load_mp3_file(const char *path, size_t *out_size, size_t *out_st
 }
 
 static int probe_mp3(const uint8_t *data, size_t size, size_t start,
-                     unsigned int *channels, unsigned int *sample_rate)
+                     unsigned int *channels, unsigned int *sample_rate,
+                     int *bitrate_kbps)
 {
     mp3dec_t dec;
     mp3dec_frame_info_t info;
@@ -226,6 +228,7 @@ static int probe_mp3(const uint8_t *data, size_t size, size_t start,
             info.frame_bytes = g_probe_steps[g_probe_i].frame_bytes;
             info.hz          = g_probe_steps[g_probe_i].hz;
             info.channels    = g_probe_steps[g_probe_i].channels;
+            info.bitrate_kbps = 128; /* host-test default for duration estimate */
             g_probe_i++;
         } else {
             samples = mp3dec_decode_frame(&dec, data + pos, (int)(size - pos), NULL, &info);
@@ -239,6 +242,8 @@ static int probe_mp3(const uint8_t *data, size_t size, size_t start,
         if (samples > 0 && info.hz > 0 && info.channels > 0) {
             *channels = (unsigned int)info.channels;
             *sample_rate = (unsigned int)info.hz;
+            if (bitrate_kbps)
+                *bitrate_kbps = info.bitrate_kbps;
             return 0;
         }
     }
@@ -361,6 +366,7 @@ int audio_play_mp3(const char *path)
     uint8_t *file_data = load_mp3_file(path, &file_size, &data_start);
     unsigned int ch = 0;
     unsigned int sr = 0;
+    int bitrate_kbps = 0;
     size_t chunk_bytes;
     mp3_ring_t ring = {0};
     Thread th;
@@ -381,7 +387,7 @@ int audio_play_mp3(const char *path)
     if (!file_data)
         return -1;
 
-    if (probe_mp3(file_data, file_size, data_start, &ch, &sr) != 0) {
+    if (probe_mp3(file_data, file_size, data_start, &ch, &sr, &bitrate_kbps) != 0) {
         linearFree(file_data);
         return -2;
     }
@@ -400,6 +406,18 @@ int audio_play_mp3(const char *path)
         linearFree(file_data);
         return -4;
     }
+
+    if (bitrate_kbps > 0 && file_size > data_start) {
+        size_t payload = file_size - data_start;
+        int64_t dur = (int64_t)((double)payload * 8.0 * (double)sr /
+                                ((double)bitrate_kbps * 1000.0));
+        if (dur > 0)
+            audio_ctrl_set_duration(dur);
+    }
+    if (resuming)
+        audio_ctrl_set_position(resume_samples);
+
+    samples_fed = resuming ? (uint64_t)resume_samples : 0;
 
     chunk_bytes = SAMPLES_PER_BUF * ch * sizeof(int16_t);
     ring.data = file_data;
@@ -504,6 +522,7 @@ int audio_play_mp3(const char *path)
                 DSP_FlushDataCache(bufs[next], buf_bytes);
                 ndspChnWaveBufAdd(channel_id, wb);
                 samples_fed += SAMPLES_PER_BUF;
+                audio_ctrl_set_position((int64_t)samples_fed);
                 next = (next + 1) % N_WAVEBUFS;
             } else if (ring.decode_done) {
                 if (avail > 0) {
@@ -522,6 +541,7 @@ int audio_play_mp3(const char *path)
                     DSP_FlushDataCache(bufs[next], buf_bytes);
                     ndspChnWaveBufAdd(channel_id, wb);
                     samples_fed += samples;
+                    audio_ctrl_set_position((int64_t)samples_fed);
                     next = (next + 1) % N_WAVEBUFS;
                 }
                 stream_done = true;

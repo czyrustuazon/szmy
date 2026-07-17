@@ -11,7 +11,7 @@ typedef uint64_t drflac_uint64;
 typedef struct {
     unsigned int channels;
     unsigned int sampleRate;
-    drflac_uint64 totalFrames;
+    drflac_uint64 totalPCMFrameCount;
     drflac_uint64 framesRead;
     int          closed;
 } drflac;
