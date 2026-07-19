@@ -15,6 +15,7 @@
 #include "audio.h"
 #include "audio_ctrl.h"
 #include "audio_viz.h"
+#include "error_log.h"
 #include "pcm_ring.h"
 
 #define SAMPLES_PER_BUF  4096
@@ -168,6 +169,7 @@ int audio_play_flac(const char *path)
     if (!th) {
         linearFree(ring.ring);
         drflac_close(flac);
+        error_log_set_site("flac:decode_thread");
         return -7;
     }
 

@@ -886,6 +886,19 @@ static int shuffle_seen_has(char seen[][320], int n, const char *needle)
     return 0;
 }
 
+/* Drain an async shuffle build (same as the UI poll loop). */
+static int shuffle_start_complete(void)
+{
+    int n = musiclist_shuffle_start();
+
+    while (n < 0) {
+        TEST_ASSERT_TRUE(musiclist_shuffle_building());
+        n = musiclist_shuffle_poll();
+    }
+    TEST_ASSERT_FALSE(musiclist_shuffle_building());
+    return n;
+}
+
 static void test_shuffle_cycle(void)
 {
     char deep[320];
@@ -897,6 +910,8 @@ static void test_shuffle_cycle(void)
 
     /* Inactive: every call is a safe no-op. */
     TEST_ASSERT_FALSE(musiclist_shuffle_active());
+    TEST_ASSERT_FALSE(musiclist_shuffle_building());
+    TEST_ASSERT_EQUAL(-1, musiclist_shuffle_poll());
     TEST_ASSERT_NULL(musiclist_shuffle_next());
     musiclist_shuffle_mark_played("ghost.mp3");
     musiclist_shuffle_stop();
@@ -911,12 +926,12 @@ static void test_shuffle_cycle(void)
     snprintf(zebra, sizeof(zebra), "%s/zebra.wav", g_root);
 
     TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
-    musiclist_select_next(); /* selection != 0 to prove it is restored */
+    musiclist_select_next(); /* selection stays put across an async build */
     srand(1234);
 
-    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    TEST_ASSERT_EQUAL(3, shuffle_start_complete());
     TEST_ASSERT_TRUE(musiclist_shuffle_active());
-    /* Building the cycle walked the library but put the view back. */
+    /* Building no longer walks via the UI list, so cwd/selection are intact. */
     TEST_ASSERT_EQUAL_STRING(g_root, musiclist_cwd());
     TEST_ASSERT_EQUAL(1, musiclist_get_selected());
 
@@ -937,13 +952,13 @@ static void test_shuffle_cycle(void)
      * Two opposite mark orders across two cycles: whatever the shuffled
      * order is, at least one mark lands away from the cursor (swap) and
      * the bag still empties without repeats. */
-    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start()); /* rebuild while active */
+    TEST_ASSERT_EQUAL(3, shuffle_start_complete()); /* rebuild while active */
     musiclist_shuffle_mark_played(alpha);
     musiclist_shuffle_mark_played(zebra);
     musiclist_shuffle_mark_played(deep);
     TEST_ASSERT_NULL(musiclist_shuffle_next());
 
-    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    TEST_ASSERT_EQUAL(3, shuffle_start_complete());
     musiclist_shuffle_mark_played(deep);
     musiclist_shuffle_mark_played(deep);          /* already played: no-op */
     musiclist_shuffle_mark_played("ghost.mp3");   /* unknown: no-op */
@@ -972,10 +987,34 @@ static void test_shuffle_cycle(void)
         q = mkdtemp(empty);
         TEST_ASSERT_NOT_NULL(q);
         TEST_ASSERT_EQUAL(0, musiclist_open(empty));
-        TEST_ASSERT_EQUAL(0, musiclist_shuffle_start());
+        TEST_ASSERT_EQUAL(0, shuffle_start_complete());
         TEST_ASSERT_FALSE(musiclist_shuffle_active());
         musiclist_exit();
         rmdir(empty);
+    }
+
+    /* Cancel an in-progress build; unreadable pending folders are skipped. */
+    {
+        char rock[300];
+
+        TEST_ASSERT_EQUAL(0, make_temp_tree());
+        TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+        TEST_ASSERT_EQUAL(-1, musiclist_shuffle_start()); /* root has rock/ */
+        TEST_ASSERT_TRUE(musiclist_shuffle_building());
+        musiclist_shuffle_stop();
+        TEST_ASSERT_FALSE(musiclist_shuffle_building());
+        TEST_ASSERT_FALSE(musiclist_shuffle_active());
+
+        TEST_ASSERT_EQUAL(-1, musiclist_shuffle_start());
+        snprintf(rock, sizeof(rock), "%s/rock", g_root);
+        TEST_ASSERT_EQUAL(0, rmdir(rock)); /* pending folder disappears */
+        TEST_ASSERT_EQUAL(-1, musiclist_shuffle_poll()); /* skip missing */
+        TEST_ASSERT_EQUAL(2, musiclist_shuffle_poll());  /* publish bag */
+        TEST_ASSERT_TRUE(musiclist_shuffle_active());
+
+        musiclist_exit();
+        TEST_ASSERT_EQUAL(0, musiclist_shuffle_start()); /* empty root */
+        rm_tree();
     }
 }
 
@@ -1003,7 +1042,7 @@ static void test_shuffle_forget_on_delete(void)
 
     /* Forgetting an already-played track shrinks the played region and
      * never disturbs the remaining draws. */
-    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    TEST_ASSERT_EQUAL(3, shuffle_start_complete());
     p = musiclist_shuffle_next();
     TEST_ASSERT_NOT_NULL(p);
     strncpy(first, p, sizeof(first) - 1);
@@ -1019,7 +1058,7 @@ static void test_shuffle_forget_on_delete(void)
 
     /* Forgetting a folder drops everything inside it (but not lookalike
      * prefixes: the boundary must be '/' or end of string). */
-    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    TEST_ASSERT_EQUAL(3, shuffle_start_complete());
     musiclist_shuffle_forget(rockdir);
     p = musiclist_shuffle_next();
     TEST_ASSERT_NOT_NULL(p);
@@ -1031,7 +1070,7 @@ static void test_shuffle_forget_on_delete(void)
 
     /* Deleting through musiclist purges the bag automatically, so shuffle
      * can never hand out a deleted file. */
-    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    TEST_ASSERT_EQUAL(3, shuffle_start_complete());
     TEST_ASSERT_EQUAL(0, musiclist_delete_file(alpha));
     p = musiclist_shuffle_next();
     TEST_ASSERT_NOT_NULL(p);

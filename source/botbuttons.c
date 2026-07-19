@@ -51,6 +51,8 @@ static int8_t     s_eq_scope[AUDIO_VIZ_SCOPE]; /* drawn waveform window */
 static float      s_eq_scope_pos;              /* smooth scroll cursor (points) */
 static int        s_repeat_mode;               /* 0=off, 1=one track, 2=all */
 static int        s_shuffle_on;                /* random no-repeat cycle */
+static int        s_shuffle_pending;           /* bag build in progress */
+static int        s_shuffle_play_when_ready;   /* start next track when bag ready */
 static u16        s_bg_cache[BOT_W * BOT_H];
 static int        s_bg_cache_ready;
 static u16        s_shadow[BOT_W * BOT_H]; /* off-screen compose target */
@@ -1001,9 +1003,17 @@ static void activate_widget(int id)
         }
         if (s_shuffle_on) {
             next = musiclist_shuffle_next();
-            if (next == NULL && s_repeat_mode == 2
-                && musiclist_shuffle_start() > 0)
-                next = musiclist_shuffle_next();
+            if (next == NULL && s_repeat_mode == 2) {
+                if (musiclist_shuffle_building()) {
+                    botbuttons_shuffle_request_next();
+                } else {
+                    int n = musiclist_shuffle_start();
+                    if (n > 0)
+                        next = musiclist_shuffle_next();
+                    else if (n < 0)
+                        botbuttons_shuffle_request_next();
+                }
+            }
         } else {
             const char *cur = audio_current_path();
             next = musiclist_next_file_after(
@@ -1039,19 +1049,32 @@ static void activate_widget(int id)
             break;
         }
         if (!s_shuffle_on) {
+            int n;
+
             srand((unsigned)svcGetSystemTick());
-            if (musiclist_shuffle_start() > 0) {
+            n = musiclist_shuffle_start();
+            if (n > 0) {
                 s_shuffle_on = 1;
+                s_shuffle_pending = 0;
                 /* The playing track already had its turn this cycle. */
                 musiclist_shuffle_mark_played(audio_current_path());
                 if (s_repeat_mode == 1)
                     s_repeat_mode = 2;
                 toast_show("SHUFFLE ON");
+            } else if (n < 0) {
+                s_shuffle_on = 1;
+                s_shuffle_pending = 1;
+                s_shuffle_play_when_ready = 0;
+                if (s_repeat_mode == 1)
+                    s_repeat_mode = 2;
+                toast_show("SHUFFLE…");
             } else {
                 toast_show("NO TRACKS");
             }
         } else {
             s_shuffle_on = 0;
+            s_shuffle_pending = 0;
+            s_shuffle_play_when_ready = 0;
             musiclist_shuffle_stop();
             toast_show("SHUFFLE OFF");
         }
@@ -1072,6 +1095,53 @@ int botbuttons_repeat_mode(void)
 int botbuttons_shuffle_on(void)
 {
     return s_shuffle_on;
+}
+
+void botbuttons_shuffle_request_next(void)
+{
+    s_shuffle_pending         = 1;
+    s_shuffle_play_when_ready = 1;
+    toast_show("SHUFFLE…");
+    s_dirty = 1;
+}
+
+/* Finish an async shuffle bag build; play the next track if one was requested
+ * while the bag was still being collected. Call once per main-loop tick. */
+void botbuttons_shuffle_poll(void)
+{
+    int n;
+
+    if (!s_shuffle_pending && !musiclist_shuffle_building())
+        return;
+
+    n = musiclist_shuffle_poll();
+    if (n < 0)
+        return;
+
+    s_shuffle_pending = 0;
+    if (n == 0) {
+        s_shuffle_on = 0;
+        s_shuffle_play_when_ready = 0;
+        toast_show("NO TRACKS");
+        s_dirty = 1;
+        return;
+    }
+
+    if (!s_shuffle_play_when_ready) {
+        /* Toggle-on path: current track already counts as played. */
+        musiclist_shuffle_mark_played(audio_current_path());
+        toast_show("SHUFFLE ON");
+    } else {
+        const char *next = musiclist_shuffle_next();
+
+        s_shuffle_play_when_ready = 0;
+        if (next != NULL) {
+            (void)audio_play_file_async(next);
+            (void)musiclist_select_path(next);
+        }
+        toast_show("SHUFFLE ON");
+    }
+    s_dirty = 1;
 }
 
 void botbuttons_init(PrintConsole *bottom)
@@ -1110,6 +1180,8 @@ void botbuttons_init(PrintConsole *bottom)
     s_display_press   = 0;
     s_repeat_mode     = 0;
     s_shuffle_on      = 0;
+    s_shuffle_pending = 0;
+    s_shuffle_play_when_ready = 0;
     trackmeta_free(&s_meta);
     memset(&s_meta, 0, sizeof(s_meta));
     s_meta_path[0]    = '\0';

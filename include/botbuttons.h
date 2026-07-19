@@ -27,3 +27,9 @@ int botbuttons_repeat_mode(void);
 
 /* True while shuffle is enabled (random no-repeat cycle). */
 int botbuttons_shuffle_on(void);
+
+/* Advance an in-progress shuffle bag build; call once per main-loop tick. */
+void botbuttons_shuffle_poll(void);
+
+/* After an async bag rebuild, play the next shuffled track when ready. */
+void botbuttons_shuffle_request_next(void);

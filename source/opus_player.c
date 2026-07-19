@@ -6,6 +6,7 @@
 #include "audio.h"
 #include "audio_ctrl.h"
 #include "audio_viz.h"
+#include "error_log.h"
 #include "pcm_ring.h"
 
 #if defined(UNIT_TEST)
@@ -188,6 +189,7 @@ int audio_play_opus(const char *path)
     if (!th) {
         linearFree(ring.ring);
         op_free(of);
+        error_log_set_site("opus:decode_thread");
         return -7;
     }
 

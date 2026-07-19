@@ -70,18 +70,25 @@ const char *musiclist_first_file(void);
 /* Shuffle cycle: snapshot every file in the library in random order.
  * Each track is handed out exactly once per cycle.
  *
- * musiclist_shuffle_start rebuilds the cycle (restarting any current one)
- * and returns the number of tracks (0 = empty library).
+ * musiclist_shuffle_start begins a new cycle (cancelling any in-progress
+ * build), scans one folder, then returns: >0 bag ready with that many tracks,
+ * 0 empty, -1 still building (call musiclist_shuffle_poll each frame).
+ * musiclist_shuffle_poll advances an in-progress build by one folder; returns
+ * -1 if still going, or >=0 when the bag is ready (same meaning as start).
+ * musiclist_shuffle_building is true between start and the finishing poll.
  * musiclist_shuffle_next returns the next unplayed track, or NULL when the
  * cycle is exhausted; call start again to begin a new cycle.
  * musiclist_shuffle_mark_played counts a manually chosen track as played so
  * it does not come up again this cycle (no-op if unknown/already played).
  * musiclist_shuffle_forget drops a deleted file (or every file under a
  * deleted folder) from the cycle so it can never be handed out again.
- * musiclist_shuffle_stop discards the cycle and its played history. */
+ * musiclist_shuffle_stop discards the cycle, any in-progress build, and
+ * played history. */
 int  musiclist_shuffle_start(void);
+int  musiclist_shuffle_poll(void);
 void musiclist_shuffle_stop(void);
 int  musiclist_shuffle_active(void);
+int  musiclist_shuffle_building(void);
 const char *musiclist_shuffle_next(void);
 void musiclist_shuffle_mark_played(const char *path);
 void musiclist_shuffle_forget(const char *path);

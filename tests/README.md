@@ -32,6 +32,7 @@ Parallel jobs are on by default (`nproc`). Override with `make -j4` or `make JOB
 | ID3 skip | `source/id3_util.c` | Synthetic byte buffers |
 | Paths / labels | `source/path_util.c` | String inputs |
 | Error strings | `source/audio_errors.c` | Error codes |
+| SD error log | `source/error_log.c` | Temp dirs + append/format |
 | BMP parsing / hit tests | `source/bmp_util.c` | Embedded minimal BMP bytes |
 | Font init errors | `source/jptext_errors.c` | Error codes |
 | Pause/stop/resume state | `source/audio_ctrl.c` | Direct API calls (no NDSP) |

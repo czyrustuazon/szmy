@@ -8,6 +8,7 @@
 #include "audio_ctrl.h"
 #include "audio_ctrl_internal.h"
 #include "audio_viz.h"
+#include "error_log.h"
 #include "file_magic.h"
 #include "libvgmstream.h"
 #include "pcm_ring.h"
@@ -80,17 +81,23 @@ static int start_playback_thread(int keep_resume)
     audio_ctrl_prepare_async(keep_resume);
 
     if (!threadCreate(playback_thread_func, NULL, 0x8000,
-                      PLAYBACK_THREAD_PRIO, -1, true))
+                      PLAYBACK_THREAD_PRIO, -1, true)) {
+        error_log_set_site("async:playback_thread");
         return -7;
+    }
     return 0;
 }
 
 void audio_resume(void)
 {
+    int r;
+
     if (!audio_is_paused() || audio_is_playing())
         return;
     audio_ctrl_set_paused_flag(0);
-    (void)start_playback_thread(1);
+    r = start_playback_thread(1);
+    if (r != 0)
+        audio_set_play_error(r);
 }
 
 int audio_seek_ratio(float ratio)
@@ -159,6 +166,8 @@ int audio_play_file_async(const char *path)
     int r;
 
     if (!g_audio_initialized || !path) {
+        error_log_set_site("async:bad_args");
+        error_log_set_fail_path(path);
         audio_set_play_error(-1);
         return -1;
     }
@@ -171,6 +180,7 @@ int audio_play_file_async(const char *path)
     audio_ctrl_clear_timeline();
     strncpy(g_play_path, path, sizeof(g_play_path) - 1);
     g_play_path[sizeof(g_play_path) - 1] = '\0';
+    error_log_set_fail_path(g_play_path);
 
     r = start_playback_thread(0);
     if (r != 0)
@@ -235,8 +245,12 @@ static void vgm_decode_thread(void *arg)
 
 int audio_play_file(const char *path)
 {
-    if (!path || !g_audio_initialized)
+    if (!path || !g_audio_initialized) {
+        error_log_set_site("vgm:bad_args");
         return -1;
+    }
+
+    error_log_set_fail_path(path);
 
     switch (audio_route_for_path(path)) {
     case AUDIO_ROUTE_FLAC:
@@ -253,15 +267,19 @@ int audio_play_file(const char *path)
     audio_viz_reset();
 
     libstreamfile_t *libsf = libstreamfile_open_from_stdio(path);
-    if (!libsf)
+    if (!libsf) {
+        error_log_set_site("vgm:open");
         return -2;
+    }
 
     libvgmstream_config_t cfg = {0};
     cfg.allow_play_forever = false;
     libvgmstream_t *vg = libvgmstream_create(libsf, 0, &cfg);
     libstreamfile_close(libsf);
-    if (!vg)
+    if (!vg) {
+        error_log_set_site("vgm:create");
         return -3;
+    }
 
     int64_t resume   = audio_take_resume_sample();
     int     resuming = (resume >= 0);
@@ -275,6 +293,7 @@ int audio_play_file(const char *path)
     int sr = fmt->sample_rate;
     if (ch < 1 || ch > 2 || sr < 300 || sr > 48000) {
         libvgmstream_free(vg);
+        error_log_set_site("vgm:format");
         return -4;
     }
 
@@ -296,6 +315,7 @@ int audio_play_file(const char *path)
     ring.ring        = (uint8_t *)linearAlloc(ring.ring_size);
     if (!ring.ring) {
         libvgmstream_free(vg);
+        error_log_set_site("vgm:ring_alloc");
         return -5;
     }
     LightLock_Init(&ring.lock);
@@ -306,6 +326,7 @@ int audio_play_file(const char *path)
     if (!th) {
         linearFree(ring.ring);
         libvgmstream_free(vg);
+        error_log_set_site("vgm:decode_thread");
         return -6;
     }
 
@@ -331,6 +352,7 @@ int audio_play_file(const char *path)
             linearFree(ring.ring);
             libvgmstream_free(vg);
             g_channel_used = -1;
+            error_log_set_site("vgm:wavebuf_alloc");
             return -7;
         }
         memset(&g_waveBufs[i], 0, sizeof(ndspWaveBuf));

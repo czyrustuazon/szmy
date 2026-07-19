@@ -15,6 +15,7 @@
 #include "audio.h"
 #include "audio_ctrl.h"
 #include "audio_viz.h"
+#include "error_log.h"
 #include "id3_util.h"
 #include "pcm_ring.h"
 
@@ -469,6 +470,7 @@ int audio_play_mp3(const char *path)
     if (!th) {
         linearFree(ring.ring);
         linearFree(file_data);
+        error_log_set_site("mp3:decode_thread");
         return -7;
     }
 
