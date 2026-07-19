@@ -13,7 +13,8 @@ int audio_init(void);
 /* Shutdown NDSP. */
 void audio_exit(void);
 
-/* Play a file (vgmstream formats + FLAC via dr_flac + MP3 via minimp3).
+/* Play a file (vgmstream formats + FLAC via dr_flac + MP3 via minimp3 +
+ * Opus via libopusfile when available).
  * Path is UTF-8, e.g. "sdmc:/music.wav". Blocks until playback finishes or stop is requested.
  * Returns 0 on success, negative on error (file not found, unsupported format, etc.). */
 int audio_play_file(const char *path);
@@ -23,6 +24,9 @@ int audio_play_flac(const char *path);
 
 /* Play an MP3 file (used internally when path ends with .mp3/.mp2). */
 int audio_play_mp3(const char *path);
+
+/* Play an Opus file (used internally for .opus / Ogg Opus). */
+int audio_play_opus(const char *path);
 
 /* Request playback to stop (call from another thread or signal; playback thread will exit). */
 void audio_stop(void);

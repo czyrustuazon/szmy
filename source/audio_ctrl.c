@@ -2,6 +2,7 @@
 #include "audio_ctrl_internal.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 
 static volatile bool g_stop_requested;
 static volatile bool g_pause_requested;
@@ -13,11 +14,13 @@ static int64_t       g_resume_sample;
 static volatile int  g_last_play_error;
 static volatile int64_t g_duration_samples;
 static volatile int64_t g_position_samples;
+static volatile int32_t g_sample_rate;
 
 void audio_ctrl_clear_timeline(void)
 {
     g_duration_samples = 0;
     g_position_samples = 0;
+    g_sample_rate      = 0;
 }
 
 void audio_ctrl_reset(void)
@@ -101,6 +104,18 @@ void audio_ctrl_set_position(int64_t samples)
     g_position_samples = samples;
 }
 
+void audio_ctrl_set_sample_rate(int32_t rate)
+{
+    if (rate < 0)
+        rate = 0;
+    g_sample_rate = rate;
+}
+
+int32_t audio_ctrl_sample_rate(void)
+{
+    return g_sample_rate;
+}
+
 int64_t audio_ctrl_duration_samples(void)
 {
     return g_duration_samples;
@@ -109,6 +124,34 @@ int64_t audio_ctrl_duration_samples(void)
 int64_t audio_ctrl_position_samples(void)
 {
     return g_position_samples;
+}
+
+int audio_time_seconds(int *pos_sec, int *dur_sec)
+{
+    int32_t rate = g_sample_rate;
+    int64_t dur  = g_duration_samples;
+    int64_t pos  = g_position_samples;
+
+    if (rate <= 0 || dur <= 0)
+        return 0;
+    if (pos < 0)
+        pos = 0;
+    if (pos > dur)
+        pos = dur;
+    if (pos_sec)
+        *pos_sec = (int)(pos / rate);
+    if (dur_sec)
+        *dur_sec = (int)(dur / rate);
+    return 1;
+}
+
+void audio_format_mmss(int seconds, char *out, size_t out_size)
+{
+    if (out == NULL || out_size == 0)
+        return;
+    if (seconds < 0)
+        seconds = 0;
+    snprintf(out, out_size, "%d:%02d", seconds / 60, seconds % 60);
 }
 
 float audio_progress_ratio(void)

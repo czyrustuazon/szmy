@@ -2,6 +2,7 @@
 #define AUDIO_CTRL_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 void audio_ctrl_reset(void);
 
@@ -20,9 +21,16 @@ void    audio_ctrl_set_resume_sample(int64_t sample);
 
 void    audio_ctrl_set_duration(int64_t samples);
 void    audio_ctrl_set_position(int64_t samples);
+void    audio_ctrl_set_sample_rate(int32_t rate);
+int32_t audio_ctrl_sample_rate(void);
 int64_t audio_ctrl_duration_samples(void);
 int64_t audio_ctrl_position_samples(void);
 float   audio_progress_ratio(void);
+
+/* Elapsed/total whole seconds; 0 if duration or sample rate is unknown. */
+int  audio_time_seconds(int *pos_sec, int *dur_sec);
+/* Render seconds as "M:SS" (minutes unpadded). */
+void audio_format_mmss(int seconds, char *out, size_t out_size);
 
 int  audio_last_play_error(void);
 void audio_set_play_error(int error);

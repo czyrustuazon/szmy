@@ -46,6 +46,13 @@ static inline int ui_center_y(ui_rect_t parent, int child_h)
 #define BOT_DISPLAY_W    272
 #define BOT_DISPLAY_H    114
 
+/* Equalizer strip: dark inset field between folder and trash buttons
+ * (field spans ~x70..250, y31..50 in the 320x240 chrome). */
+#define BOT_EQ_X   76
+#define BOT_EQ_Y   34
+#define BOT_EQ_W  168
+#define BOT_EQ_H   15
+
 /* Seek groove under the display (empty in art — drawn in software). */
 #define BOT_SEEK_X        28
 #define BOT_SEEK_Y       176
@@ -69,8 +76,14 @@ typedef enum {
     BOT_WID_PLAYPAUSE,
     BOT_WID_FF,       /* unused on current chrome */
     BOT_WID_NEXT,
+    BOT_WID_FOLDER,   /* top-left; reserved for FTP toggle */
     BOT_WID_COUNT
 } bot_widget_id_t;
+
+static inline ui_rect_t bot_eq_rect(void)
+{
+    return ui_rect(BOT_EQ_X, BOT_EQ_Y, BOT_EQ_W, BOT_EQ_H);
+}
 
 static inline ui_rect_t bot_band_seek(void)
 {
@@ -111,7 +124,7 @@ static inline ui_rect_t bot_seek_thumb(float progress)
 
 /*
  * Absolute hitboxes for bottom-clean.png @ 320x240:
- *   top:    status bar | trash
+ *   top:    folder | status bar | trash
  *   middle: display panel, then seek groove under it
  *   bottom: repeat | prev | play/pause | next | shuffle
  */
@@ -122,6 +135,7 @@ static inline void bot_layout_all(ui_rect_t out[BOT_WID_COUNT])
     for (i = 0; i < (int)BOT_WID_COUNT; i++)
         out[i] = ui_rect(0, 0, 0, 0);
 
+    out[BOT_WID_FOLDER]    = ui_rect(22, 28, 42, 36); /* mirrors trash */
     out[BOT_WID_DELETE]    = ui_rect(256, 28, 42, 36);
     out[BOT_WID_REPEAT]    = ui_rect(22, 198, 42, 40);
     out[BOT_WID_SHUFFLE]   = ui_rect(256, 198, 42, 40);

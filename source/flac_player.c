@@ -14,6 +14,7 @@
 #include <string.h>
 #include "audio.h"
 #include "audio_ctrl.h"
+#include "audio_viz.h"
 #include "pcm_ring.h"
 
 #define SAMPLES_PER_BUF  4096
@@ -21,7 +22,9 @@
 /* Ring buffer: ~2 seconds stereo @ 44.1kHz = 176400 bytes/channel * 2 = 352800. Use 384 KB. */
 #define RING_BYTES       (384 * 1024)
 #define DECODE_STACK     0x8000
-#define PLAYBACK_YIELD_US  (8000)
+/* svcSleepThread takes nanoseconds; 8 ms per idle pass vs a ~93 ms buffer
+ * period. (The old value 8000 was meant as µs but slept 8 µs — a busy poll.) */
+#define PLAYBACK_YIELD_NS  (8000000LL)
 
 #ifdef UNIT_TEST
 /* Force decode_thread through the producer_full yield path N times. */
@@ -133,14 +136,18 @@ int audio_play_flac(const char *path)
         audio_ctrl_set_position(resume);
     }
 
+    /* Error codes follow audio_error_message(): -4 bad channels/rate,
+     * -5 out of memory, -7 could not start playback. */
     unsigned int ch = flac->channels;
     unsigned int sr = flac->sampleRate;
     if (ch < 1 || ch > 2 || sr < 300 || sr > 48000) {
         drflac_close(flac);
-        return -2;
+        return -4;
     }
 
     audio_ctrl_set_duration((int64_t)flac->totalPCMFrameCount);
+    audio_ctrl_set_sample_rate((int32_t)sr);
+    audio_viz_reset();
 
     size_t chunk_bytes = SAMPLES_PER_BUF * ch * sizeof(drflac_int16);
 
@@ -152,7 +159,7 @@ int audio_play_flac(const char *path)
     ring.ring = (uint8_t *)linearAlloc(ring.ring_size);
     if (!ring.ring) {
         drflac_close(flac);
-        return -3;
+        return -5;
     }
     LightLock_Init(&ring.lock);
 
@@ -161,7 +168,7 @@ int audio_play_flac(const char *path)
     if (!th) {
         linearFree(ring.ring);
         drflac_close(flac);
-        return -4;
+        return -7;
     }
 
     int ndsp_format = (ch == 2) ? NDSP_FORMAT_STEREO_PCM16 : NDSP_FORMAT_MONO_PCM16;
@@ -229,6 +236,8 @@ int audio_play_flac(const char *path)
                 ring.read_pos += chunk_bytes;
                 LightLock_Unlock(&ring.lock);
                 wb->nsamples = SAMPLES_PER_BUF;
+                audio_viz_feed((const int16_t *)bufs[next],
+                               SAMPLES_PER_BUF, ch, (int)sr);
                 DSP_FlushDataCache(bufs[next], buf_bytes);
                 ndspChnWaveBufAdd(channel_id, wb);
                 samples_fed += SAMPLES_PER_BUF;
@@ -249,6 +258,8 @@ int audio_play_flac(const char *path)
                     ring.read_pos = rp_snap;
                     LightLock_Unlock(&ring.lock);
                     wb->nsamples = (u32)samples;
+                    audio_viz_feed((const int16_t *)bufs[next],
+                                   samples, ch, (int)sr);
                     DSP_FlushDataCache(bufs[next], buf_bytes);
                     ndspChnWaveBufAdd(channel_id, wb);
                     samples_fed += samples;
@@ -257,7 +268,7 @@ int audio_play_flac(const char *path)
                 }
                 stream_done = true;
             } else {
-                svcSleepThread(PLAYBACK_YIELD_US);
+                svcSleepThread(PLAYBACK_YIELD_NS);
             }
         } else {
             LightLock_Lock(&ring.lock);
@@ -266,7 +277,7 @@ int audio_play_flac(const char *path)
             if (ring.decode_done && a == 0)
                 stream_done = true;
             else
-                svcSleepThread(PLAYBACK_YIELD_US);
+                svcSleepThread(PLAYBACK_YIELD_NS);
         }
     }
 

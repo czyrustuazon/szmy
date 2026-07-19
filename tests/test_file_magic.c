@@ -69,6 +69,41 @@ static void test_flac_magic_null_and_short(void)
     remove(g_flac_path);
 }
 
+static void write_temp_opus(void)
+{
+    /* Minimal OggS header + OpusHead identification somewhere in the page. */
+    unsigned char buf[64];
+    memset(buf, 0, sizeof(buf));
+    memcpy(buf, "OggS", 4);
+    memcpy(buf + 28, "OpusHead", 8);
+    write_temp_bytes("szmy_opus_test.bin", buf, sizeof(buf));
+}
+
+static void test_opus_magic_detection(void)
+{
+    write_temp_opus();
+    TEST_ASSERT_TRUE(file_has_opus_magic(g_flac_path));
+    TEST_ASSERT_FALSE(file_has_opus_magic("/nonexistent/path.opus"));
+    remove(g_flac_path);
+}
+
+static void test_opus_magic_null_and_non_ogg(void)
+{
+    TEST_ASSERT_FALSE(file_has_opus_magic(NULL));
+
+    write_temp_bytes("szmy_opus_short.bin", "Ogg", 3);
+    TEST_ASSERT_FALSE(file_has_opus_magic(g_flac_path));
+    remove(g_flac_path);
+
+    write_temp_bytes("szmy_opus_ogg_only.bin", "OggSxxxx", 8);
+    TEST_ASSERT_FALSE(file_has_opus_magic(g_flac_path));
+    remove(g_flac_path);
+
+    write_temp_bytes("szmy_opus_not_ogg.bin", "XXXXOpusHead", 12);
+    TEST_ASSERT_FALSE(file_has_opus_magic(g_flac_path));
+    remove(g_flac_path);
+}
+
 static void test_route_by_extension(void)
 {
     /* Happy: extension-based routes */
@@ -76,6 +111,8 @@ static void test_route_by_extension(void)
     TEST_ASSERT_EQUAL(AUDIO_ROUTE_FLAC, audio_route_for_path("sdmc:/music/a.FLAC"));
     TEST_ASSERT_EQUAL(AUDIO_ROUTE_MP3, audio_route_for_path("sdmc:/music/a.mp3"));
     TEST_ASSERT_EQUAL(AUDIO_ROUTE_MP3, audio_route_for_path("sdmc:/music/a.mp2"));
+    TEST_ASSERT_EQUAL(AUDIO_ROUTE_OPUS, audio_route_for_path("sdmc:/music/a.opus"));
+    TEST_ASSERT_EQUAL(AUDIO_ROUTE_OPUS, audio_route_for_path("sdmc:/music/a.OPUS"));
     /* Sad/default: unknown extension falls through to VGM */
     TEST_ASSERT_EQUAL(AUDIO_ROUTE_VGM, audio_route_for_path("sdmc:/music/a.brstm"));
 }
@@ -86,11 +123,16 @@ static void test_route_by_magic(void)
     write_temp_flac();
     TEST_ASSERT_EQUAL(AUDIO_ROUTE_FLAC, audio_route_for_path(g_flac_path));
     remove(g_flac_path);
+
+    /* Happy: .ogg with OpusHead routes to Opus */
+    write_temp_opus();
+    TEST_ASSERT_EQUAL(AUDIO_ROUTE_OPUS, audio_route_for_path(g_flac_path));
+    remove(g_flac_path);
 }
 
 static void test_route_non_magic_file_is_vgm(void)
 {
-    /* Sad/default: real file without flac/mp3 extension or magic → VGM */
+    /* Sad/default: real file without flac/mp3/opus extension or magic → VGM */
     write_temp_bytes("szmy_route_vgm.bin", "XXXX", 4);
     TEST_ASSERT_EQUAL(AUDIO_ROUTE_VGM, audio_route_for_path(g_flac_path));
     remove(g_flac_path);
@@ -107,6 +149,8 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_flac_magic_detection);
     RUN_TEST(test_flac_magic_null_and_short);
+    RUN_TEST(test_opus_magic_detection);
+    RUN_TEST(test_opus_magic_null_and_non_ogg);
     RUN_TEST(test_route_by_extension);
     RUN_TEST(test_route_by_magic);
     RUN_TEST(test_route_non_magic_file_is_vgm);

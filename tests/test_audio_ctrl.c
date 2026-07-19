@@ -348,6 +348,62 @@ static void test_after_seek_restart_preserves_resume_and_timeline(void)
     TEST_ASSERT_EQUAL_INT64(4500, audio_take_resume_sample());
 }
 
+static void test_sample_rate_and_time_seconds(void)
+{
+    int pos = -1, dur = -1;
+
+    /* Unknown rate/duration → no time info */
+    TEST_ASSERT_EQUAL(0, audio_ctrl_sample_rate());
+    TEST_ASSERT_FALSE(audio_time_seconds(&pos, &dur));
+
+    audio_ctrl_set_sample_rate(-100);
+    TEST_ASSERT_EQUAL(0, audio_ctrl_sample_rate());
+
+    audio_ctrl_set_sample_rate(44100);
+    TEST_ASSERT_EQUAL(44100, audio_ctrl_sample_rate());
+    TEST_ASSERT_FALSE(audio_time_seconds(&pos, &dur)); /* duration unknown */
+
+    audio_ctrl_set_duration(44100LL * 125); /* 2:05 */
+    audio_ctrl_set_position(44100LL * 61);  /* 1:01 */
+    TEST_ASSERT_TRUE(audio_time_seconds(&pos, &dur));
+    TEST_ASSERT_EQUAL(61, pos);
+    TEST_ASSERT_EQUAL(125, dur);
+    TEST_ASSERT_TRUE(audio_time_seconds(NULL, NULL));
+
+    /* note_paused_at bypasses position clamps; time must clamp to [0, dur] */
+    audio_note_paused_at(-5);
+    TEST_ASSERT_TRUE(audio_time_seconds(&pos, NULL));
+    TEST_ASSERT_EQUAL(0, pos);
+    audio_note_paused_at(44100LL * 1000);
+    TEST_ASSERT_TRUE(audio_time_seconds(&pos, NULL));
+    TEST_ASSERT_EQUAL(125, pos);
+
+    /* clear_timeline drops the rate too */
+    audio_ctrl_clear_timeline();
+    TEST_ASSERT_EQUAL(0, audio_ctrl_sample_rate());
+    TEST_ASSERT_FALSE(audio_time_seconds(&pos, &dur));
+}
+
+static void test_format_mmss(void)
+{
+    char buf[8];
+
+    audio_format_mmss(0, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("0:00", buf);
+    audio_format_mmss(61, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("1:01", buf);
+    audio_format_mmss(3599, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("59:59", buf);
+    audio_format_mmss(-7, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("0:00", buf);
+
+    /* Guard arms: NULL out and zero size are no-ops */
+    buf[0] = 'x';
+    audio_format_mmss(5, NULL, sizeof(buf));
+    audio_format_mmss(5, buf, 0);
+    TEST_ASSERT_EQUAL('x', buf[0]);
+}
+
 static void test_natural_end_snaps_position_to_duration(void)
 {
     audio_ctrl_set_duration(800);
@@ -388,6 +444,8 @@ int main(void)
     RUN_TEST(test_duration_position_and_progress_ratio);
     RUN_TEST(test_set_resume_sample_sets_position);
     RUN_TEST(test_after_seek_restart_preserves_resume_and_timeline);
+    RUN_TEST(test_sample_rate_and_time_seconds);
+    RUN_TEST(test_format_mmss);
     RUN_TEST(test_natural_end_snaps_position_to_duration);
     return UNITY_END();
 }

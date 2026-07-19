@@ -14,6 +14,7 @@
 #include <strings.h>
 #include "audio.h"
 #include "audio_ctrl.h"
+#include "audio_viz.h"
 #include "id3_util.h"
 #include "pcm_ring.h"
 
@@ -21,7 +22,9 @@
 #define N_WAVEBUFS       4
 #define RING_BYTES       (384 * 1024)
 #define DECODE_STACK     0x8000
-#define PLAYBACK_YIELD_US  (8000)
+/* svcSleepThread takes nanoseconds; 8 ms per idle pass vs a ~93 ms buffer
+ * period. (The old value 8000 was meant as µs but slept 8 µs — a busy poll.) */
+#define PLAYBACK_YIELD_NS  (8000000LL)
 #define PCM16_MAX_SAMPLES  (MINIMP3_MAX_SAMPLES_PER_FRAME)
 
 typedef struct {
@@ -209,13 +212,18 @@ static uint8_t *load_mp3_file(const char *path, size_t *out_size, size_t *out_st
     return buf;
 }
 
+/* Walks every frame header (no PCM decode with NULL output) so the summed
+ * sample count is exact for VBR files and ignores trailing tags/junk —
+ * a bitrate-based byte estimate is wrong for both. */
 static int probe_mp3(const uint8_t *data, size_t size, size_t start,
                      unsigned int *channels, unsigned int *sample_rate,
-                     int *bitrate_kbps)
+                     int64_t *total_samples)
 {
     mp3dec_t dec;
     mp3dec_frame_info_t info;
     size_t pos = start;
+    int found = 0;
+    int64_t total = 0;
 
     mp3dec_init(&dec);
     while (pos + 4 < size) {
@@ -228,7 +236,6 @@ static int probe_mp3(const uint8_t *data, size_t size, size_t start,
             info.frame_bytes = g_probe_steps[g_probe_i].frame_bytes;
             info.hz          = g_probe_steps[g_probe_i].hz;
             info.channels    = g_probe_steps[g_probe_i].channels;
-            info.bitrate_kbps = 128; /* host-test default for duration estimate */
             g_probe_i++;
         } else {
             samples = mp3dec_decode_frame(&dec, data + pos, (int)(size - pos), NULL, &info);
@@ -239,15 +246,18 @@ static int probe_mp3(const uint8_t *data, size_t size, size_t start,
         if (info.frame_bytes <= 0)
             break;
         pos += (size_t)info.frame_bytes;
-        if (samples > 0 && info.hz > 0 && info.channels > 0) {
+        if (samples > 0)
+            total += samples;
+        if (!found && samples > 0 && info.hz > 0 && info.channels > 0) {
             *channels = (unsigned int)info.channels;
             *sample_rate = (unsigned int)info.hz;
-            if (bitrate_kbps)
-                *bitrate_kbps = info.bitrate_kbps;
-            return 0;
+            found = 1;
         }
     }
-    return -1;
+    if (!found)
+        return -1;
+    *total_samples = total;
+    return 0;
 }
 
 static void decode_thread(void *arg)
@@ -366,7 +376,7 @@ int audio_play_mp3(const char *path)
     uint8_t *file_data = load_mp3_file(path, &file_size, &data_start);
     unsigned int ch = 0;
     unsigned int sr = 0;
-    int bitrate_kbps = 0;
+    int64_t total_samples = 0;
     size_t chunk_bytes;
     mp3_ring_t ring = {0};
     Thread th;
@@ -387,7 +397,7 @@ int audio_play_mp3(const char *path)
     if (!file_data)
         return -1;
 
-    if (probe_mp3(file_data, file_size, data_start, &ch, &sr, &bitrate_kbps) != 0) {
+    if (probe_mp3(file_data, file_size, data_start, &ch, &sr, &total_samples) != 0) {
         linearFree(file_data);
         return -2;
     }
@@ -407,13 +417,10 @@ int audio_play_mp3(const char *path)
         return -4;
     }
 
-    if (bitrate_kbps > 0 && file_size > data_start) {
-        size_t payload = file_size - data_start;
-        int64_t dur = (int64_t)((double)payload * 8.0 * (double)sr /
-                                ((double)bitrate_kbps * 1000.0));
-        if (dur > 0)
-            audio_ctrl_set_duration(dur);
-    }
+    if (total_samples > 0)
+        audio_ctrl_set_duration(total_samples);
+    audio_ctrl_set_sample_rate((int32_t)sr);
+    audio_viz_reset();
     if (resuming)
         audio_ctrl_set_position(resume_samples);
 
@@ -519,6 +526,8 @@ int audio_play_mp3(const char *path)
                 ring.ring_read_pos += chunk_bytes;
                 LightLock_Unlock(&ring.lock);
                 wb->nsamples = SAMPLES_PER_BUF;
+                audio_viz_feed((const int16_t *)bufs[next],
+                               SAMPLES_PER_BUF, ch, (int)sr);
                 DSP_FlushDataCache(bufs[next], buf_bytes);
                 ndspChnWaveBufAdd(channel_id, wb);
                 samples_fed += SAMPLES_PER_BUF;
@@ -538,6 +547,8 @@ int audio_play_mp3(const char *path)
                     ring.ring_read_pos = rp_snap;
                     LightLock_Unlock(&ring.lock);
                     wb->nsamples = (u32)samples;
+                    audio_viz_feed((const int16_t *)bufs[next],
+                                   samples, ch, (int)sr);
                     DSP_FlushDataCache(bufs[next], buf_bytes);
                     ndspChnWaveBufAdd(channel_id, wb);
                     samples_fed += samples;
@@ -546,7 +557,7 @@ int audio_play_mp3(const char *path)
                 }
                 stream_done = true;
             } else {
-                svcSleepThread(PLAYBACK_YIELD_US);
+                svcSleepThread(PLAYBACK_YIELD_NS);
             }
         } else {
             size_t a;
@@ -556,7 +567,7 @@ int audio_play_mp3(const char *path)
             if (ring.decode_done && a == 0)
                 stream_done = true;
             else
-                svcSleepThread(PLAYBACK_YIELD_US);
+                svcSleepThread(PLAYBACK_YIELD_NS);
         }
     }
 
@@ -564,6 +575,12 @@ int audio_play_mp3(const char *path)
     pausing = audio_end_is_pause();
     threadJoin(th, U64_MAX);
     ndspChnWaveBufClear(channel_id);
+
+    /* Natural end: snap duration to what actually played so the final
+     * position/duration ratio is exactly 1.0 even if the header-walk total
+     * and the decoded total disagree (e.g. corrupt tail frames). */
+    if (stream_done && !pausing && !audio_should_stop() && samples_fed > 0)
+        audio_ctrl_set_duration((int64_t)samples_fed);
 
     if (pausing)
         audio_note_paused_at((int64_t)samples_fed);

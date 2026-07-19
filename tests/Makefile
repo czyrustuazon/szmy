@@ -24,11 +24,12 @@ CFLAGS   := -std=c11 -Wall -Wextra -Werror -g -O0 \
             -I$(PROJECT_ROOT)/include \
             -Isupport \
             -Ithird_party/unity
-LDFLAGS  := --coverage -pthread
+LDFLAGS  := --coverage -pthread -lm
 
 UNITY_SRC    := third_party/unity/unity.c
 HOST_MOCKS   := support/host_mocks.c
 HOST_DRFLAC  := support/host_drflac.c
+HOST_OPUSFILE := support/host_opusfile.c
 
 SRC_PROD := \
 	$(PROJECT_ROOT)/source/id3_util.c \
@@ -39,7 +40,10 @@ SRC_PROD := \
 	$(PROJECT_ROOT)/source/audio_ctrl.c \
 	$(PROJECT_ROOT)/source/file_magic.c \
 	$(PROJECT_ROOT)/source/musiclist.c \
-	$(PROJECT_ROOT)/source/pcm_ring.c
+	$(PROJECT_ROOT)/source/pcm_ring.c \
+	$(PROJECT_ROOT)/source/audio_viz.c \
+	$(PROJECT_ROOT)/source/ftp_server.c \
+	$(PROJECT_ROOT)/source/tap_detector.c
 
 TEST_RUNNERS := \
 	test_id3_util \
@@ -51,8 +55,12 @@ TEST_RUNNERS := \
 	test_file_magic \
 	test_musiclist \
 	test_pcm_ring \
+	test_audio_viz \
+	test_ftp_server \
+	test_tap_detector \
 	test_mp3_player \
-	test_flac_player
+	test_flac_player \
+	test_opus_player
 
 # MSYS2/Cygwin gcc writes *.exe; invoking ./build/runner without it can fail.
 ifeq ($(OS),Windows_NT)
@@ -119,12 +127,15 @@ $(BUILD_DIR)/$(1): $(1).c $(SRC_PROD) $(UNITY_SRC) | $(BUILD_DIR)
 	$$(CC) $$(CFLAGS) $$^ -o $$@ $$(LDFLAGS)
 endef
 
-$(foreach t,$(filter-out test_mp3_player test_flac_player,$(TEST_RUNNERS)),$(eval $(call TEST_RULE,$(t))))
+$(foreach t,$(filter-out test_mp3_player test_flac_player test_opus_player,$(TEST_RUNNERS)),$(eval $(call TEST_RULE,$(t))))
 
 $(BUILD_DIR)/test_mp3_player: test_mp3_player.c $(SRC_PROD) $(PROJECT_ROOT)/source/mp3_player.c $(HOST_MOCKS) $(UNITY_SRC) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -I$(VGM_MINIMP3) $^ -o $@ $(LDFLAGS)
 
 $(BUILD_DIR)/test_flac_player: test_flac_player.c $(SRC_PROD) $(PROJECT_ROOT)/source/flac_player.c $(HOST_MOCKS) $(HOST_DRFLAC) $(UNITY_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+$(BUILD_DIR)/test_opus_player: test_opus_player.c $(SRC_PROD) $(PROJECT_ROOT)/source/opus_player.c $(HOST_MOCKS) $(HOST_OPUSFILE) $(UNITY_SRC) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 clean:

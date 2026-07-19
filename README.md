@@ -1,16 +1,35 @@
 # 3DS Homebrew – szmy (multi-format audio)
 
 A Nintendo 3DS homebrew music player using **devkitPro**, **libctru**, and **vgmstream**.  
-Supports **WAV, FLAC, MP3** (optional), **BRSTM/BCSTM/BFSTM**, ADPCM, and other formats vgmstream can decode with built-in codecs.
+Supports **WAV, FLAC, Opus** (optional), **MP3** (optional), **BRSTM/BCSTM/BFSTM**, ADPCM, and other formats vgmstream can decode with built-in codecs.
 
 ## Requirements
 
 - [devkitPro](https://devkitpro.org/) with **devkitARM** and **3DS tools**
-- On Windows: use the **devkitPro MSYS2** shell (so `make` and `DEVKITARM` are set)
+- On Windows: use the **devkitPro MSYS2** shell (so `make` and `DEVKITARM` are set).  
+  Package installs (`pacman` / `dkp-pacman`) only work from that shell — not from PowerShell or cmd.
 - Host toolchain for unit tests / coverage gate: **gcc**, **make**, **lcov**  
   (`pacman -S --needed gcc make lcov` in the same MSYS shell)
+- Optional audio portlibs (same MSYS shell):
+
+  ```bash
+  pacman -S --needed 3ds-opusfile   # Opus (.opus / Ogg Opus)
+  pacman -S --needed 3ds-mpg123     # optional vgmstream MPEG helper
+  ```
+
+  On some setups the wrapper is named `dkp-pacman` instead of `pacman`.
 
 ## Build
+
+From a fresh clone (devkitPro MSYS2 shell on Windows):
+
+```bash
+git clone https://github.com/ctdeeds/szmy.git
+cd szmy
+pacman -S --needed gcc make lcov          # host tests / coverage gate
+# optional: pacman -S --needed 3ds-opusfile 3ds-mpg123
+make
+```
 
 1. Set the environment if needed:
    - **Windows (MSYS):** usually already set by the devkitPro shell  
@@ -62,6 +81,15 @@ Same coverage gate as `make` unless you pass `SKIP_COVERAGE=1`. Install with FBI
 - Copy `szmy.3dsx` (and optionally `szmy.smdh`) to the SD card, e.g. `sd:/3ds/`.
 - Launch from the homebrew launcher (e.g. Luma3DS + Homebrew Menu).
 
+## FTP file transfer
+
+Tap the **folder** icon on the bottom screen to start a simple FTP server for the entire SD card (`sdmc:/`).
+
+- Top screen shows `ftp://IP:5000`, username **`szmy`**, and a fresh random 6-character password.
+- Playback stops and music controls are disabled while FTP is on; tap the folder icon again to stop and refresh the playlist.
+- Uses plain FTP (not FTPS). The password only protects casual LAN access — do not expose the console beyond your trusted network.
+- Passive mode (PASV) only; one client at a time.
+
 ## Clean
 
 ```bash
@@ -74,13 +102,14 @@ Pure logic and control-plane code is extracted into host-testable modules and ex
 
 `make` / `make cia` fail if line or function coverage of those modules drops below 100%. Branch coverage is reported but not gated.
 
-## Audio (vgmstream + FLAC + optional MP3)
+## Audio (vgmstream + FLAC + optional Opus / MP3)
 
-- **vgmstream** is built from `vgmstream-master/` (`make -C vgmstream-master -f Makefile.3ds`). Core library only.
+- **vgmstream** is built from `vgmstream/` (`make -C vgmstream -f Makefile.3ds`). Core library only.
 - **FLAC** via **dr_flac** (`include/dr_flac.h`) for `.flac` paths.
-- **MP3** optional: `dkp-pacman -S 3ds-mpg123` (needs `$(DEVKITPRO)/portlibs/3ds/lib/libmpg123.a`). Without it, the app still builds for other formats.
+- **Opus** optional: install `3ds-opusfile` (see Requirements). Routes `.opus` and Ogg files with an `OpusHead` packet. Without the portlib, the app still builds; Opus paths report unsupported format.
+- **MP3** optional: install `3ds-mpg123` for vgmstream MPEG. Normal `.mp3` playback uses the in-tree minimp3 path either way.
 - Playback uses **NDSP**. Place DSP firmware at `sdmc:/3ds/dspfirm.cdc`.
-- Format is detected from content / extension (`.flac` → dr_flac; others → vgmstream / MP3 path as configured).
+- Format is detected from content / extension (`.flac` → dr_flac; `.opus` / Ogg Opus → libopusfile; `.mp3` → minimp3; else → vgmstream).
 
 ## Project layout
 
@@ -89,13 +118,15 @@ Pure logic and control-plane code is extracted into host-testable modules and ex
 | `source/` | App C sources |
 | `include/` | Headers |
 | `tests/` | Host Unity tests, fixtures, coverage |
-| `vgmstream-master/` | vgmstream core (3DS build under `build-3ds/`) |
-| `gfx/` | Bitmaps / textures |
+| `vgmstream/` | Vendored vgmstream core (3DS build under `vgmstream/build-3ds/`) |
+| `gfx/` | Bitmaps / textures (also used as PNG→BMP fallbacks) |
 | `data/` | Embedded binary data |
 | `Makefile` | 3DS build + coverage gate |
 | `szmy.rsf` | CIA Rom Specification |
 
 Build products (`build/`, `*.3dsx` / `*.cia` / `*.elf` / `*.smdh`, `tests/build/`, coverage HTML, gcov data) are gitignored.
+
+PNG sources (`up.png`, `bottom-clean.png`, `generic_music.png`) are converted at build time when ImageMagick or Pillow is available; otherwise the Makefile copies matching `gfx/*.bmp` fallbacks so a clone can still rebuild without those tools.
 
 ## New 3DS: why only ~128 MB?
 

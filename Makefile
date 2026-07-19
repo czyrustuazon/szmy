@@ -54,7 +54,8 @@ include $(DEVKITARM)/3ds_rules
 #
 # APP_TITLE is the name of the app stored in the SMDH file (Optional)
 # APP_DESCRIPTION is the description of the app stored in the SMDH file (Optional)
-# APP_AUTHOR is the author of the app stored in the SMDH file (Optional)
+# APP_AUTHOR is the author of the app stored in the SMDH file (Optional).
+# Short form of Czyrus Tuazon (CyT / zaccken); keep this brief for the Home Menu.
 # ICON is the filename of the icon (.png), relative to the project folder.
 # BANNER_IMAGE / BANNER_AUDIO: Home Menu top-screen banner (256x128 PNG + WAV/OGG).
 #---------------------------------------------------------------------------------
@@ -73,8 +74,13 @@ GRAPHICS := gfx
 GFXBUILD := $(BUILD)
 
 APP_TITLE := SZMY Music Player
-APP_DESCRIPTION := Play MP3, FLAC, WAV, BRSTM and more from your SD card.
+APP_DESCRIPTION := Play MP3, FLAC, Opus, WAV, BRSTM and more from your SD card.
 APP_AUTHOR := CyT
+
+# CIA / title version (makerom -major/-minor/-micro). RemasterVersion is in szmy.rsf.
+APP_VERSION_MAJOR := 1
+APP_VERSION_MINOR := 0
+APP_VERSION_MICRO := 0
 
 # Home Menu banner (top screen). Override: BANNER_IMAGE=... BANNER_AUDIO=...
 BANNER_IMAGE ?= banner.png
@@ -106,18 +112,36 @@ VGMSTREAM_DIR := $(TOPDIR)/vgmstream
 VGMSTREAM_LIB := $(VGMSTREAM_DIR)/build-3ds/libvgmstream.a
 
 #---------------------------------------------------------------------------------
-# MP3: optional, via libmpg123 from devkitPro portlibs. Install: dkp-pacman -S 3ds-mpg123
+# Optional portlibs: mpg123 (vgmstream MPEG) and opusfile (dedicated Opus player).
+# Install: dkp-pacman -S 3ds-mpg123 3ds-opusfile
 #---------------------------------------------------------------------------------
 DEVKITPRO ?= $(patsubst %/devkitARM,%,$(DEVKITARM))
 PORTLIBS_3DS := $(DEVKITPRO)/portlibs/3ds
 MPG123_LIB   := $(PORTLIBS_3DS)/lib/libmpg123.a
+OPUSFILE_LIB := $(PORTLIBS_3DS)/lib/libopusfile.a
+
+LIBDIRS := $(CTRULIB)
+LIBS := -lvgmstream -lcitro2d -lcitro3d -lctru -lm
+
 ifneq ($(wildcard $(MPG123_LIB)),)
-  LIBDIRS := $(CTRULIB) $(PORTLIBS_3DS)
-  LIBS := -lvgmstream -lmpg123 -lcitro2d -lcitro3d -lctru -lm
   ENABLE_MP3 := 1
-else
-  LIBDIRS := $(CTRULIB)
-  LIBS := -lvgmstream -lcitro2d -lcitro3d -lctru -lm
+endif
+ifneq ($(wildcard $(OPUSFILE_LIB)),)
+  ENABLE_OPUS := 1
+  # pkg-config opusfile: headers live under include/opus/
+  CFLAGS += -DENABLE_OPUS -I$(PORTLIBS_3DS)/include/opus
+endif
+
+ifneq ($(ENABLE_MP3)$(ENABLE_OPUS),)
+  LIBDIRS := $(CTRULIB) $(PORTLIBS_3DS)
+  LIBS := -lvgmstream
+  ifneq ($(ENABLE_MP3),)
+    LIBS += -lmpg123
+  endif
+  ifneq ($(ENABLE_OPUS),)
+    LIBS += -lopusfile -lopus -logg
+  endif
+  LIBS += -lcitro2d -lcitro3d -lctru -lm
 endif
 
 #---------------------------------------------------------------------------------
@@ -178,7 +202,9 @@ export OFILES_BIN := $(addsuffix .o,$(BINFILES)) \
 	$(addsuffix .o,$(T3XFILES))
 
 # Embedded top BG: 400x240 from root up.png. Bottom: 320x240 from root bottom.png.
-export GFX_EMBED      := top_screen_bg_embed.bmp.o bottom_screen_bg_embed.bmp.o
+# Plus the generic now-playing icon (root generic_music.png @ 96x96).
+export GFX_EMBED      := top_screen_bg_embed.bmp.o bottom_screen_bg_embed.bmp.o \
+	generic_music_embed.bmp.o
 export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES) $(GFX_EMBED)
 
 export HFILES := $(PICAFILES:.v.pica=_shbin.h) $(SHLISTFILES:.shlist=_shbin.h) \
@@ -217,55 +243,56 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(TOPDIR)/$(ROMFS)
 endif
 
-# 400x240 = top (up.png); 320x240 = bottom (bottom.png).
+# PNG → embed BMP. Prefer ImageMagick / Pillow; always fall back to checked-in
+# gfx/*.bmp so a fresh clone rebuilds without converters (MSYS often has Windows
+# convert.exe on PATH, which is not ImageMagick and must not be used).
+# $(1)=label $(2)=src png $(3)=out bmp $(4)=WxH $(5)=fallback bmp
+define PNG_TO_EMBED_BMP
+	@echo $(1): build embed $(4) from $(notdir $(2)) ...
+	@out="$(3)"; src="$(2)"; fb="$(5)"; ok=0; \
+	rm -f "$$out"; \
+	if command -v magick >/dev/null 2>&1; then \
+		magick "$$src" -strip -filter Triangle -resize "$(4)!" -depth 8 "$$out" \
+			&& ok=1; \
+	fi; \
+	if [ "$$ok" != 1 ] && command -v convert >/dev/null 2>&1 \
+		&& convert -version 2>&1 | grep -qi ImageMagick; then \
+		convert "$$src" -strip -filter Triangle -resize "$(4)!" -depth 8 "$$out" \
+			&& ok=1; \
+	fi; \
+	if [ "$$ok" != 1 ]; then \
+		py=; command -v python3 >/dev/null 2>&1 && py=python3; \
+		[ -z "$$py" ] && command -v python >/dev/null 2>&1 && py=python; \
+		if [ -n "$$py" ]; then \
+			w=$$(echo "$(4)" | cut -dx -f1); h=$$(echo "$(4)" | cut -dx -f2); \
+			$$py -c "from PIL import Image; Image.open(r'$$src').convert('RGB').resize(($$w,$$h)).save(r'$$out','BMP')" \
+				&& ok=1 && echo "  (Pillow -> $$out)"; \
+		fi; \
+	else \
+		echo "  (ImageMagick -> $$out)"; \
+	fi; \
+	if [ "$$ok" != 1 ] || [ ! -s "$$out" ]; then \
+		echo "  (fallback: $$fb)" >&2; \
+		cp -f "$$fb" "$$out"; \
+	fi
+endef
+
+# 400x240 = top (up.png); 320x240 = bottom (bottom-clean.png).
 TOP_BG_SRC    := $(CURDIR)/up.png
 TOP_BG_EMBED  := $(CURDIR)/$(BUILD)/top_screen_bg_embed.bmp
 BOT_BG_SRC    := $(CURDIR)/bottom-clean.png
 BOT_BG_EMBED  := $(CURDIR)/$(BUILD)/bottom_screen_bg_embed.bmp
+GEN_ICON_SRC   := $(CURDIR)/generic_music.png
+GEN_ICON_EMBED := $(CURDIR)/$(BUILD)/generic_music_embed.bmp
 
-$(TOP_BG_EMBED): $(TOP_BG_SRC) | $(BUILD)
-	@echo top_screen_bg: build embed 400x240 from up.png ...
-	@out="$(TOP_BG_EMBED)"; \
-	if command -v magick >/dev/null 2>&1; then \
-		magick "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
-			|| magick "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP:$$out" 2>/dev/null \
-			|| magick "$<" -strip -resize 400x240\! "$$out"; \
-		echo "  (ImageMagick -> $$out)"; \
-	elif command -v convert >/dev/null 2>&1; then \
-		convert "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
-			|| convert "$<" -strip -filter Triangle -resize 400x240\! -depth 8 "BMP:$$out" 2>/dev/null \
-			|| convert "$<" -strip -resize 400x240\! "$$out"; \
-		echo "  (ImageMagick -> $$out)"; \
-	elif command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then \
-		py=python3; command -v python3 >/dev/null 2>&1 || py=python; \
-		$$py -c "from PIL import Image; Image.open(r'$<').convert('RGB').resize((400,240)).save(r'$$out','BMP')"; \
-		echo "  (Pillow -> $$out)"; \
-	else \
-		echo "  (no converter: using gfx/top_screen_bg.bmp fallback)" >&2; \
-		cp -f "$(CURDIR)/gfx/top_screen_bg.bmp" "$$out"; \
-	fi
+$(TOP_BG_EMBED): $(TOP_BG_SRC) $(CURDIR)/gfx/top_screen_bg.bmp | $(BUILD)
+	$(call PNG_TO_EMBED_BMP,top_screen_bg,$(TOP_BG_SRC),$(TOP_BG_EMBED),400x240,$(CURDIR)/gfx/top_screen_bg.bmp)
 
-$(BOT_BG_EMBED): $(BOT_BG_SRC) | $(BUILD)
-	@echo bottom_screen_bg: build embed 320x240 from bottom-clean.png ...
-	@out="$(BOT_BG_EMBED)"; \
-	if command -v magick >/dev/null 2>&1; then \
-		magick "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
-			|| magick "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP:$$out" 2>/dev/null \
-			|| magick "$<" -strip -resize 320x240\! "$$out"; \
-		echo "  (ImageMagick -> $$out)"; \
-	elif command -v convert >/dev/null 2>&1; then \
-		convert "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP3:$$out" 2>/dev/null \
-			|| convert "$<" -strip -filter Triangle -resize 320x240\! -depth 8 "BMP:$$out" 2>/dev/null \
-			|| convert "$<" -strip -resize 320x240\! "$$out"; \
-		echo "  (ImageMagick -> $$out)"; \
-	elif command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then \
-		py=python3; command -v python3 >/dev/null 2>&1 || py=python; \
-		$$py -c "from PIL import Image; Image.open(r'$<').convert('RGB').resize((320,240)).save(r'$$out','BMP')"; \
-		echo "  (Pillow -> $$out)"; \
-	else \
-		echo "  (no converter: using gfx/bottom_screen_bg.bmp fallback)" >&2; \
-		cp -f "$(CURDIR)/gfx/bottom_screen_bg.bmp" "$$out"; \
-	fi
+$(BOT_BG_EMBED): $(BOT_BG_SRC) $(CURDIR)/gfx/bottom_screen_bg.bmp | $(BUILD)
+	$(call PNG_TO_EMBED_BMP,bottom_screen_bg,$(BOT_BG_SRC),$(BOT_BG_EMBED),320x240,$(CURDIR)/gfx/bottom_screen_bg.bmp)
+
+$(GEN_ICON_EMBED): $(GEN_ICON_SRC) $(CURDIR)/gfx/generic_music.bmp | $(BUILD)
+	$(call PNG_TO_EMBED_BMP,generic_music,$(GEN_ICON_SRC),$(GEN_ICON_EMBED),96x96,$(CURDIR)/gfx/generic_music.bmp)
 
 # Bottom play/pause: 1% black transparent, trim, cap 32px, tile 32x32 BMP4 (half of prior 64).
 # Unchanged magick strategy per request; 24-bit fallback still uses alpha_key() in C.
@@ -331,7 +358,9 @@ ifndef SKIP_COVERAGE
 endif
 	@$(MAKE) 3ds-all
 
-3ds-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BOT_BG_EMBED) $(BTN_BMPS) $(T3XFILES) $(VGMSTREAM_LIB)
+# Use the full path for the t3x (not bare $(T3XFILES)) so we hit the rule that
+# depends on $(TOP_BG_EMBED), not the generic 3ds_rules %.t3x pattern.
+3ds-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(TOP_BG_EMBED) $(BOT_BG_EMBED) $(GEN_ICON_EMBED) $(BTN_BMPS) $(GFXBUILD)/top_screen_bg.t3x $(VGMSTREAM_LIB)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile all
 
 #---------------------------------------------------------------------------------
@@ -374,8 +403,10 @@ cia: all $(APP_BANNER)
 	@test -f "$(OUTPUT).elf" || ( echo "Error: no ELF. Run 'make' first." ; exit 1 )
 	@test -f "$(OUTPUT).smdh" || ( echo "Error: missing $(OUTPUT).smdh (run make without NO_SMDH, add icon)."; exit 1 )
 	@test -f "$(APP_BANNER)" || ( echo "Error: missing $(APP_BANNER)."; exit 1 )
-	@makerom -f cia -o $(OUTPUT).cia -rsf $(CIA_RSF) -target t -elf $(OUTPUT).elf -icon $(OUTPUT).smdh -banner $(APP_BANNER)
-	@echo built: $(OUTPUT).cia
+	@makerom -f cia -o $(OUTPUT).cia -rsf $(CIA_RSF) -target t \
+		-elf $(OUTPUT).elf -icon $(OUTPUT).smdh -banner $(APP_BANNER) \
+		-major $(APP_VERSION_MAJOR) -minor $(APP_VERSION_MINOR) -micro $(APP_VERSION_MICRO)
+	@echo built: $(OUTPUT).cia \(v$(APP_VERSION_MAJOR).$(APP_VERSION_MINOR).$(APP_VERSION_MICRO)\)
 
 $(BUILD):
 	@mkdir -p $@
@@ -435,6 +466,10 @@ bottom_screen_bg_embed.bmp.o: bottom_screen_bg_embed.bmp
 	@echo $(notdir $<)
 	@$(bin2o)
 
+generic_music_embed.bmp.o: generic_music_embed.bmp
+	@echo $(notdir $<)
+	@$(bin2o)
+
 topbg.o: top_screen_bg_embed.bmp.o top_screen_bg.t3x.o
 
 #---------------------------------------------------------------------------------
@@ -454,7 +489,7 @@ pause_inactive.bmp.o: pause_inactive.bmp
 	@echo $(notdir $<)
 	@$(bin2o)
 
-botbuttons.o: bottom_screen_bg_embed.bmp.o
+botbuttons.o: bottom_screen_bg_embed.bmp.o generic_music_embed.bmp.o
 
 #---------------------------------------------------------------------------------
 %.bin.o %_bin.h : %.bin

@@ -55,6 +55,11 @@ int path_is_mp3(const char *path)
     return path_has_extension(path, ".mp3") || path_has_extension(path, ".mp2");
 }
 
+int path_is_opus(const char *path)
+{
+    return path_has_extension(path, ".opus");
+}
+
 void musiclist_format_cwd_label(const char *cwd, char *out, size_t out_sz)
 {
     if (!out || out_sz == 0)

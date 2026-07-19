@@ -28,6 +28,7 @@ static void test_audio_extension_whitelist(void)
     TEST_ASSERT_TRUE(path_is_audio_extension("song.wav"));
     TEST_ASSERT_TRUE(path_is_audio_extension("song.flac"));
     TEST_ASSERT_TRUE(path_is_audio_extension("song.ogg"));
+    TEST_ASSERT_TRUE(path_is_audio_extension("song.opus"));
     TEST_ASSERT_TRUE(path_is_audio_extension("SONG.BRSTM"));
     TEST_ASSERT_TRUE(path_is_audio_extension("track.fsb"));
     /* Sad */
@@ -46,11 +47,15 @@ static void test_flac_and_mp3_paths(void)
     TEST_ASSERT_TRUE(path_is_flac("a.FLAC"));
     TEST_ASSERT_TRUE(path_is_mp3("sdmc:/music/a.mp3"));
     TEST_ASSERT_TRUE(path_is_mp3("sdmc:/music/a.MP2"));
+    TEST_ASSERT_TRUE(path_is_opus("sdmc:/music/a.opus"));
+    TEST_ASSERT_TRUE(path_is_opus("a.OPUS"));
     /* Sad */
     TEST_ASSERT_FALSE(path_is_flac("sdmc:/music/a.mp3"));
     TEST_ASSERT_FALSE(path_is_flac(NULL));
     TEST_ASSERT_FALSE(path_is_mp3("sdmc:/music/a.flac"));
     TEST_ASSERT_FALSE(path_is_mp3(NULL));
+    TEST_ASSERT_FALSE(path_is_opus("sdmc:/music/a.ogg"));
+    TEST_ASSERT_FALSE(path_is_opus(NULL));
 }
 
 static void test_cwd_label_root(void)

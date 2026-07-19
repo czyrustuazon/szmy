@@ -11,6 +11,7 @@ int path_is_audio_extension(const char *filename);
 
 int path_is_flac(const char *path);
 int path_is_mp3(const char *path);
+int path_is_opus(const char *path);
 
 /* Format sdmc:/music cwd for UI (see musiclist.h constants). */
 void musiclist_format_cwd_label(const char *cwd, char *out, size_t out_sz);

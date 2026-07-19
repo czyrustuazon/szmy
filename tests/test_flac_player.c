@@ -33,16 +33,16 @@ static void test_invalid_flac_data(void)
 static void test_bad_channels(void)
 {
     /* Sad: channel count outside 1..2 */
-    TEST_ASSERT_EQUAL(-2, audio_play_flac("bad_channels.flac"));
-    TEST_ASSERT_EQUAL(-2, audio_play_flac("zero_channels.flac"));
+    TEST_ASSERT_EQUAL(-4, audio_play_flac("bad_channels.flac"));
+    TEST_ASSERT_EQUAL(-4, audio_play_flac("zero_channels.flac"));
     TEST_ASSERT_EQUAL(0, host_pcm_samples_fed());
 }
 
 static void test_bad_sample_rate(void)
 {
     /* Sad: sample rate outside 300..48000 */
-    TEST_ASSERT_EQUAL(-2, audio_play_flac("bad_rate.flac"));
-    TEST_ASSERT_EQUAL(-2, audio_play_flac("high_rate.flac"));
+    TEST_ASSERT_EQUAL(-4, audio_play_flac("bad_rate.flac"));
+    TEST_ASSERT_EQUAL(-4, audio_play_flac("high_rate.flac"));
     TEST_ASSERT_EQUAL(0, host_pcm_samples_fed());
 }
 
@@ -82,15 +82,15 @@ static void test_plays_stereo(void)
 static void test_thread_create_failure(void)
 {
     host_mock_set_thread_fail(1);
-    TEST_ASSERT_EQUAL(-4, audio_play_flac(HOST_FLAC_FIXTURE));
+    TEST_ASSERT_EQUAL(-7, audio_play_flac(HOST_FLAC_FIXTURE));
     TEST_ASSERT_EQUAL(0, host_pcm_samples_fed());
 }
 
 static void test_ring_alloc_failure(void)
 {
-    /* First linearAlloc is the PCM ring → -3 */
+    /* First linearAlloc is the PCM ring → -5 (out of memory) */
     host_mock_set_alloc_fail_after(0);
-    TEST_ASSERT_EQUAL(-3, audio_play_flac(HOST_FLAC_FIXTURE));
+    TEST_ASSERT_EQUAL(-5, audio_play_flac(HOST_FLAC_FIXTURE));
     TEST_ASSERT_EQUAL(0, host_pcm_samples_fed());
 }
 
@@ -167,7 +167,7 @@ static void test_decode_yields_when_ring_full(void)
 
 static void test_playback_waits_for_data(void)
 {
-    /* Slow decode lets the consumer outrun the producer → PLAYBACK_YIELD_US wait. */
+    /* Slow decode lets the consumer outrun the producer → PLAYBACK_YIELD_NS wait. */
     TEST_ASSERT_EQUAL(0, audio_play_flac("slow_mono.flac"));
     TEST_ASSERT_EQUAL(60000, host_pcm_samples_fed());
 }

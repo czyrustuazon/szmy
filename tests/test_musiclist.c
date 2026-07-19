@@ -790,6 +790,365 @@ static void test_delete_file_happy_and_sad(void)
     rmdir(p);
 }
 
+static void test_delete_folder_recursive(void)
+{
+    char folder[300];
+    char nested[320];
+    char file[340];
+    struct stat st;
+    FILE *fp;
+
+    TEST_ASSERT_EQUAL(-1, musiclist_delete_entry(NULL, 1));
+    TEST_ASSERT_EQUAL(-1, musiclist_delete_entry("", 1));
+    TEST_ASSERT_EQUAL(-1, musiclist_delete_entry(
+                              "/tmp/szmy_missing_folder_zzzz", 1));
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    snprintf(folder, sizeof(folder), "%s/rock", g_root);
+    snprintf(nested, sizeof(nested), "%s/nested", folder);
+    TEST_ASSERT_EQUAL(0, mkdir(nested, 0755));
+
+    snprintf(file, sizeof(file), "%s/song.mp3", nested);
+    fp = fopen(file, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    snprintf(file, sizeof(file), "%s/.hidden", folder);
+    fp = fopen(file, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    TEST_ASSERT_TRUE(musiclist_selected_is_dir());
+    TEST_ASSERT_EQUAL(0, musiclist_delete_entry(folder, 1));
+    TEST_ASSERT_NOT_EQUAL(0, stat(folder, &st));
+    TEST_ASSERT_EQUAL(2, musiclist_count());
+    TEST_ASSERT_FALSE(musiclist_selected_is_dir());
+    TEST_ASSERT_NOT_NULL(strstr(musiclist_selected_path(), "alpha.flac"));
+
+    musiclist_exit();
+    rm_tree();
+}
+
+static void test_first_file_wraps_library(void)
+{
+    char sub[300];
+    char f[320];
+    FILE *fp;
+    const char *first;
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    /* Put a file inside rock/ so depth-first finds it before alpha.flac. */
+    snprintf(sub, sizeof(sub), "%s/rock", g_root);
+    snprintf(f, sizeof(f), "%s/aaa_first.mp3", sub);
+    fp = fopen(f, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+
+    /* From deep inside a subfolder, first_file climbs back to the root. */
+    TEST_ASSERT_EQUAL(1, musiclist_activate()); /* enter rock/ */
+    TEST_ASSERT_EQUAL_STRING(sub, musiclist_cwd());
+    first = musiclist_first_file();
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_NOT_NULL(strstr(first, "aaa_first.mp3"));
+
+    /* Broken climb: cwd that go_back cannot resolve (no slash) hits the
+     * bail-out branch instead of looping forever. */
+    musiclist_test_set_cwd_root("noslash", g_root);
+    (void)musiclist_first_file();
+
+    musiclist_exit();
+    rm_tree();
+
+    /* Empty library: no file to wrap to. */
+    {
+        char empty[256];
+        char *p;
+        strcpy(empty, "/tmp/szmy_ml_ff_XXXXXX");
+        p = mkdtemp(empty);
+        TEST_ASSERT_NOT_NULL(p);
+        TEST_ASSERT_EQUAL(0, musiclist_open(p));
+        TEST_ASSERT_NULL(musiclist_first_file());
+        musiclist_exit();
+        rmdir(p);
+    }
+}
+
+static int shuffle_seen_has(char seen[][320], int n, const char *needle)
+{
+    int i;
+
+    for (i = 0; i < n; i++) {
+        if (strstr(seen[i], needle) != NULL)
+            return 1;
+    }
+    return 0;
+}
+
+static void test_shuffle_cycle(void)
+{
+    char deep[320];
+    char alpha[320], zebra[320];
+    char seen[3][320];
+    const char *p;
+    FILE *fp;
+    int   i;
+
+    /* Inactive: every call is a safe no-op. */
+    TEST_ASSERT_FALSE(musiclist_shuffle_active());
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+    musiclist_shuffle_mark_played("ghost.mp3");
+    musiclist_shuffle_stop();
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    /* A file inside rock/ so the cycle spans subfolders. */
+    snprintf(deep, sizeof(deep), "%s/rock/deep.mp3", g_root);
+    fp = fopen(deep, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    snprintf(alpha, sizeof(alpha), "%s/alpha.flac", g_root);
+    snprintf(zebra, sizeof(zebra), "%s/zebra.wav", g_root);
+
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    musiclist_select_next(); /* selection != 0 to prove it is restored */
+    srand(1234);
+
+    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    TEST_ASSERT_TRUE(musiclist_shuffle_active());
+    /* Building the cycle walked the library but put the view back. */
+    TEST_ASSERT_EQUAL_STRING(g_root, musiclist_cwd());
+    TEST_ASSERT_EQUAL(1, musiclist_get_selected());
+
+    /* A full cycle hands out each track exactly once, then runs dry. */
+    for (i = 0; i < 3; i++) {
+        p = musiclist_shuffle_next();
+        TEST_ASSERT_NOT_NULL(p);
+        strncpy(seen[i], p, sizeof(seen[i]) - 1);
+        seen[i][sizeof(seen[i]) - 1] = '\0';
+    }
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+    TEST_ASSERT_TRUE(musiclist_shuffle_active()); /* exhausted, still on */
+    TEST_ASSERT_TRUE(shuffle_seen_has(seen, 3, "alpha.flac"));
+    TEST_ASSERT_TRUE(shuffle_seen_has(seen, 3, "zebra.wav"));
+    TEST_ASSERT_TRUE(shuffle_seen_has(seen, 3, "deep.mp3"));
+
+    /* Manual plays are marked so they never repeat within a cycle.
+     * Two opposite mark orders across two cycles: whatever the shuffled
+     * order is, at least one mark lands away from the cursor (swap) and
+     * the bag still empties without repeats. */
+    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start()); /* rebuild while active */
+    musiclist_shuffle_mark_played(alpha);
+    musiclist_shuffle_mark_played(zebra);
+    musiclist_shuffle_mark_played(deep);
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+
+    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    musiclist_shuffle_mark_played(deep);
+    musiclist_shuffle_mark_played(deep);          /* already played: no-op */
+    musiclist_shuffle_mark_played("ghost.mp3");   /* unknown: no-op */
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_NULL(strstr(p, "deep.mp3"));
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_NULL(strstr(p, "deep.mp3"));
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+
+    /* Off: the played history is destroyed. */
+    musiclist_shuffle_stop();
+    TEST_ASSERT_FALSE(musiclist_shuffle_active());
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+
+    musiclist_exit();
+    rm_tree();
+
+    /* Empty library: no cycle to build. */
+    {
+        char empty[256];
+        char *q;
+
+        strcpy(empty, "/tmp/szmy_ml_shuf_XXXXXX");
+        q = mkdtemp(empty);
+        TEST_ASSERT_NOT_NULL(q);
+        TEST_ASSERT_EQUAL(0, musiclist_open(empty));
+        TEST_ASSERT_EQUAL(0, musiclist_shuffle_start());
+        TEST_ASSERT_FALSE(musiclist_shuffle_active());
+        musiclist_exit();
+        rmdir(empty);
+    }
+}
+
+static void test_shuffle_forget_on_delete(void)
+{
+    char deep[320], alpha[320], rockdir[320];
+    char first[320];
+    const char *p;
+    FILE *fp;
+
+    /* Inactive bag / NULL path: safe no-ops. */
+    musiclist_shuffle_forget(NULL);
+    musiclist_shuffle_forget("ghost.mp3");
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    snprintf(deep, sizeof(deep), "%s/rock/deep.mp3", g_root);
+    fp = fopen(deep, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    snprintf(alpha, sizeof(alpha), "%s/alpha.flac", g_root);
+    snprintf(rockdir, sizeof(rockdir), "%s/rock", g_root);
+
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    srand(4321);
+
+    /* Forgetting an already-played track shrinks the played region and
+     * never disturbs the remaining draws. */
+    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    strncpy(first, p, sizeof(first) - 1);
+    first[sizeof(first) - 1] = '\0';
+    musiclist_shuffle_forget(first);
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_TRUE(strcmp(p, first) != 0);
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_TRUE(strcmp(p, first) != 0);
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+
+    /* Forgetting a folder drops everything inside it (but not lookalike
+     * prefixes: the boundary must be '/' or end of string). */
+    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    musiclist_shuffle_forget(rockdir);
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_NULL(strstr(p, "deep.mp3"));
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_NULL(strstr(p, "deep.mp3"));
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+
+    /* Deleting through musiclist purges the bag automatically, so shuffle
+     * can never hand out a deleted file. */
+    TEST_ASSERT_EQUAL(3, musiclist_shuffle_start());
+    TEST_ASSERT_EQUAL(0, musiclist_delete_file(alpha));
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_NULL(strstr(p, "alpha.flac"));
+    p = musiclist_shuffle_next();
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_NULL(strstr(p, "alpha.flac"));
+    TEST_ASSERT_NULL(musiclist_shuffle_next());
+
+    musiclist_shuffle_stop();
+    musiclist_exit();
+    rm_tree();
+}
+
+static void test_refresh_preserves_selection(void)
+{
+    FILE *fp;
+    char extra[300];
+    char only_dir[256];
+    char *p;
+
+    TEST_ASSERT_EQUAL(-1, musiclist_refresh()); /* empty cwd after exit */
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    musiclist_select_next();
+    {
+        int sel = musiclist_get_selected();
+        TEST_ASSERT_EQUAL(0, musiclist_refresh());
+        TEST_ASSERT_EQUAL(sel, musiclist_get_selected());
+    }
+
+    /* After adding a file and refreshing, selection stays in range. */
+    snprintf(extra, sizeof(extra), "%s/new_track.mp3", g_root);
+    fp = fopen(extra, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    TEST_ASSERT_EQUAL(0, musiclist_refresh());
+    TEST_ASSERT_TRUE(musiclist_get_selected() < musiclist_count());
+
+    /* Clamp when previous selection is past the end after shrink. */
+    while (musiclist_get_selected() < musiclist_count() - 1)
+        musiclist_select_next();
+    unlink(extra);
+    TEST_ASSERT_EQUAL(0, musiclist_refresh());
+    TEST_ASSERT_EQUAL(musiclist_count() - 1, musiclist_get_selected());
+
+    /* Sad: scan fails */
+    {
+        char ghost[300];
+        snprintf(ghost, sizeof(ghost), "%s/missing_subdir", g_root);
+        musiclist_test_set_cwd_root(ghost, g_root);
+        TEST_ASSERT_EQUAL(-1, musiclist_refresh());
+    }
+
+    musiclist_exit();
+    rm_tree();
+
+    /* Refresh of a now-empty folder zeros selection. */
+    strcpy(only_dir, "/tmp/szmy_ml_ref_XXXXXX");
+    p = mkdtemp(only_dir);
+    TEST_ASSERT_NOT_NULL(p);
+    snprintf(extra, sizeof(extra), "%s/solo.mp3", p);
+    fp = fopen(extra, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    TEST_ASSERT_EQUAL(0, musiclist_open(p));
+    unlink(extra);
+    TEST_ASSERT_EQUAL(0, musiclist_refresh());
+    TEST_ASSERT_EQUAL(0, musiclist_count());
+    TEST_ASSERT_EQUAL(0, musiclist_get_selected());
+    musiclist_exit();
+    rmdir(p);
+}
+
+static void test_select_path_jumps_to_playing_file(void)
+{
+    char nested[300];
+    char missing[300];
+    char outside[300];
+    FILE *fp;
+
+    TEST_ASSERT_EQUAL(0, make_temp_tree());
+    snprintf(nested, sizeof(nested), "%s/rock/playing.mp3", g_root);
+    fp = fopen(nested, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+
+    /* A root-level target changes only the cursor. */
+    snprintf(missing, sizeof(missing), "%s/alpha.flac", g_root);
+    TEST_ASSERT_EQUAL(0, musiclist_select_path(missing));
+    TEST_ASSERT_EQUAL_STRING(g_root, musiclist_cwd());
+    TEST_ASSERT_EQUAL_STRING(missing, musiclist_selected_path());
+
+    /* A nested target opens its folder and selects the exact track. */
+    TEST_ASSERT_EQUAL(0, musiclist_select_path(nested));
+    snprintf(missing, sizeof(missing), "%s/rock", g_root);
+    TEST_ASSERT_EQUAL_STRING(missing, musiclist_cwd());
+    TEST_ASSERT_EQUAL_STRING(nested, musiclist_selected_path());
+
+    /* Stale and out-of-library paths leave the current cursor untouched. */
+    snprintf(missing, sizeof(missing), "%s/rock/gone.mp3", g_root);
+    TEST_ASSERT_EQUAL(-1, musiclist_select_path(missing));
+    TEST_ASSERT_EQUAL_STRING(nested, musiclist_selected_path());
+    snprintf(missing, sizeof(missing), "%s/missing/gone.mp3", g_root);
+    TEST_ASSERT_EQUAL(-1, musiclist_select_path(missing));
+    TEST_ASSERT_EQUAL_STRING(nested, musiclist_selected_path());
+    snprintf(outside, sizeof(outside), "%s_other/song.mp3", g_root);
+    TEST_ASSERT_EQUAL(-1, musiclist_select_path(outside));
+    TEST_ASSERT_EQUAL(-1, musiclist_select_path(NULL));
+
+    musiclist_exit();
+    rm_tree();
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -822,5 +1181,11 @@ int main(void)
     RUN_TEST(test_next_skips_unopenable_dir);
     RUN_TEST(test_last_file_skips_unopenable_dir);
     RUN_TEST(test_delete_file_happy_and_sad);
+    RUN_TEST(test_delete_folder_recursive);
+    RUN_TEST(test_first_file_wraps_library);
+    RUN_TEST(test_shuffle_cycle);
+    RUN_TEST(test_shuffle_forget_on_delete);
+    RUN_TEST(test_refresh_preserves_selection);
+    RUN_TEST(test_select_path_jumps_to_playing_file);
     return UNITY_END();
 }

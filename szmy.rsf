@@ -33,7 +33,10 @@ AccessControlInfo:
   DisableDebug          : false
   PermitMainFunctionArgument : true
   CanShareDeviceMemory  : true
-  RunnableOnSleep       : false
+  # Required for uninterrupted audio after the lid-close sleep request.
+  # Runtime aptSetSleepAllowed still decides dynamically whether sleep is
+  # rejected (playing) or accepted (idle).
+  RunnableOnSleep       : true
   # New3DS: request ~124 MB when launched from Home Menu (Legacy = 128 MB from hbmenu)
   SystemModeExt         : 124MB
   # 804 MHz + L2 cache on New3DS (ignored on O3DS). Fixes choppy FLAC/MP3 playback.
@@ -115,10 +118,12 @@ AccessControlInfo:
     - http:C
     - nim:aoc
     - soc:U
+    - ps:ps
+    - ptm:u
 
 SystemControlInfo:
   SaveDataSize          : 0K
-  RemasterVersion       : 0
+  RemasterVersion       : 1
   StackSize             : 0x40000
   Dependency:
     ac: 0x0004013000002402
@@ -130,6 +135,7 @@ SystemControlInfo:
     http: 0x0004013000002902
     ndm: 0x0004013000002b02
     pdn: 0x0004013000002102
+    ps: 0x0004013000003102
     ptm: 0x0004013000002202
     ro: 0x0004013000003702
     socket: 0x0004013000002e02

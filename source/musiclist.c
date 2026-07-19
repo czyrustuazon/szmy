@@ -262,6 +262,7 @@ int musiclist_init(void)
 
 void musiclist_exit(void)
 {
+    musiclist_shuffle_stop();
     clear_list();
     s_cwd[0] = '\0';
     s_root[0] = '\0';
@@ -330,7 +331,58 @@ void musiclist_set_prompt(const char *msg, const char *help)
     s_have_prompt = 1;
 }
 
-int musiclist_delete_file(const char *path)
+static int delete_tree(const char *path)
+{
+    DIR *dir;
+    struct dirent *ent;
+    int failed = 0;
+
+    dir = opendir(path);
+    if (dir == NULL)
+        return -1;
+
+    while ((ent = readdir(dir)) != NULL) {
+        char full[MUSIC_PATH_MAX];
+        int n;
+
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+
+        n = snprintf(full, sizeof(full), "%s/%s", path, ent->d_name);
+        if (n < 0 || (size_t)n >= sizeof(full)) {
+            /* Defensive SD/path failure; not reproducible portably on host. */
+            /* LCOV_EXCL_START */
+            failed = 1;
+            break;
+            /* LCOV_EXCL_STOP */
+        }
+
+        if (entry_is_dir(full, ent)) {
+            if (delete_tree(full) != 0) {
+                /* Recursive I/O failure is reported to the caller. */
+                /* LCOV_EXCL_START */
+                failed = 1;
+                break;
+                /* LCOV_EXCL_STOP */
+            }
+        } else if (unlink(full) != 0) {
+            /* SD write/remove failure is reported to the caller. */
+            /* LCOV_EXCL_START */
+            failed = 1;
+            break;
+            /* LCOV_EXCL_STOP */
+        }
+    }
+
+    closedir(dir);
+    /* LCOV_EXCL_START */
+    if (failed)
+        return -1;
+    /* LCOV_EXCL_STOP */
+    return rmdir(path) == 0 ? 0 : -1;
+}
+
+int musiclist_delete_entry(const char *path, int is_dir)
 {
     int idx = -1;
     int i;
@@ -345,8 +397,11 @@ int musiclist_delete_file(const char *path)
         }
     }
 
-    if (unlink(path) != 0)
+    if ((is_dir ? delete_tree(path) : unlink(path)) != 0)
         return -1;
+
+    /* A running shuffle cycle must never hand out the deleted entry. */
+    musiclist_shuffle_forget(path);
 
     if (scan_cwd() != 0)
         return -1;
@@ -363,6 +418,28 @@ int musiclist_delete_file(const char *path)
     return 0;
 }
 
+int musiclist_delete_file(const char *path)
+{
+    return musiclist_delete_entry(path, 0);
+}
+
+int musiclist_refresh(void)
+{
+    int prev = s_selected;
+
+    if (s_cwd[0] == '\0')
+        return -1;
+    if (scan_cwd() != 0)
+        return -1;
+    if (s_count == 0)
+        s_selected = 0;
+    else if (prev >= s_count)
+        s_selected = s_count - 1;
+    else
+        s_selected = prev;
+    return 0;
+}
+
 /* Defined below; used by cross-folder next/prev. */
 int musiclist_enter(void);
 int musiclist_go_back(void);
@@ -376,6 +453,53 @@ static int index_of_path(const char *path)
     for (i = 0; i < s_count; i++) {
         if (strcmp(s_paths[i], path) == 0)
             return i;
+    }
+    return -1;
+}
+
+int musiclist_select_path(const char *path)
+{
+    char   parent[MUSIC_PATH_MAX];
+    char   saved_cwd[MUSIC_PATH_MAX];
+    char  *slash;
+    size_t path_len;
+    size_t root_len;
+    int    saved_selected;
+    int    idx;
+
+    if (path == NULL || path[0] == '\0' || s_root[0] == '\0')
+        return -1;
+
+    path_len = strlen(path);
+    root_len = strlen(s_root);
+    if (path_len >= sizeof(parent) || path_len <= root_len
+        || strncmp(path, s_root, root_len) != 0 || path[root_len] != '/')
+        return -1;
+
+    strncpy(parent, path, sizeof(parent) - 1);
+    parent[sizeof(parent) - 1] = '\0';
+    slash = strrchr(parent, '/');
+    *slash = '\0';
+
+    strncpy(saved_cwd, s_cwd, sizeof(saved_cwd) - 1);
+    saved_cwd[sizeof(saved_cwd) - 1] = '\0';
+    saved_selected = s_selected;
+
+    strncpy(s_cwd, parent, sizeof(s_cwd) - 1);
+    s_cwd[sizeof(s_cwd) - 1] = '\0';
+    if (scan_cwd() == 0) {
+        idx = index_of_path(path);
+        if (idx >= 0 && s_kinds[idx] == ENTRY_FILE) {
+            s_selected = idx;
+            return 0;
+        }
+    }
+
+    /* A stale/missing path must not move the user's current cursor. */
+    strncpy(s_cwd, saved_cwd, sizeof(s_cwd) - 1);
+    s_cwd[sizeof(s_cwd) - 1] = '\0';
+    if (scan_cwd() == 0 && s_count > 0) {
+        s_selected = saved_selected < s_count ? saved_selected : s_count - 1;
     }
     return -1;
 }
@@ -530,6 +654,158 @@ const char *musiclist_next_file_after(const char *path)
             return n;
     }
     return NULL; /* no wrap at music root */
+}
+
+const char *musiclist_first_file(void)
+{
+    /* Climb to the music root, then walk depth-first for the first file. */
+    while (strcmp(s_cwd, s_root) != 0) {
+        if (musiclist_go_back() != 0)
+            break;
+    }
+    return first_file_in_cwd_recursive();
+}
+
+/* --- Shuffle cycle --------------------------------------------------------
+ * A cycle is a snapshot of every playable file, shuffled once. Entries before
+ * s_shuf_pos are played; s_shuf_pos..n-1 is the remaining bag. Manual plays
+ * are swapped down to the played region so nothing repeats within a cycle. */
+
+static char *s_shuf_paths; /* n rows of MUSIC_PATH_MAX bytes */
+static int   s_shuf_n;
+static int   s_shuf_pos;
+
+#define SHUF_PATH(i) (s_shuf_paths + (size_t)(i) * MUSIC_PATH_MAX)
+
+void musiclist_shuffle_stop(void)
+{
+    free(s_shuf_paths);
+    s_shuf_paths = NULL;
+    s_shuf_n     = 0;
+    s_shuf_pos   = 0;
+}
+
+int musiclist_shuffle_active(void)
+{
+    return s_shuf_paths != NULL;
+}
+
+int musiclist_shuffle_start(void)
+{
+    char        saved_cwd[MUSIC_PATH_MAX];
+    char        saved_sel[MUSIC_PATH_MAX];
+    char        cur[MUSIC_PATH_MAX];
+    const char *p;
+    int         have_sel;
+    int         cap = 0;
+    int         i;
+
+    musiclist_shuffle_stop();
+
+    /* Walking the library moves cwd/selection; remember both for later. */
+    strncpy(saved_cwd, s_cwd, MUSIC_PATH_MAX - 1);
+    saved_cwd[MUSIC_PATH_MAX - 1] = '\0';
+    have_sel = (s_count > 0);
+    if (have_sel) {
+        strncpy(saved_sel, s_paths[s_selected], MUSIC_PATH_MAX - 1);
+        saved_sel[MUSIC_PATH_MAX - 1] = '\0';
+    }
+
+    p = musiclist_first_file();
+    while (p != NULL) {
+        if (s_shuf_n == cap) {
+            char *grown;
+            cap   = (cap == 0) ? 32 : cap * 2;
+            grown = realloc(s_shuf_paths, (size_t)cap * MUSIC_PATH_MAX);
+            if (grown == NULL) {
+                /* Out of memory; not portably reproducible on host. */
+                /* LCOV_EXCL_START */
+                musiclist_shuffle_stop();
+                break;
+                /* LCOV_EXCL_STOP */
+            }
+            s_shuf_paths = grown;
+        }
+        strncpy(SHUF_PATH(s_shuf_n), p, MUSIC_PATH_MAX - 1);
+        SHUF_PATH(s_shuf_n)[MUSIC_PATH_MAX - 1] = '\0';
+        s_shuf_n++;
+
+        /* p points into s_paths, which the next walk step rescans. */
+        strncpy(cur, p, MUSIC_PATH_MAX - 1);
+        cur[MUSIC_PATH_MAX - 1] = '\0';
+        p = musiclist_next_file_after(cur);
+    }
+
+    /* Fisher-Yates; memmove tolerates the harmless i == j self-copy. */
+    for (i = s_shuf_n - 1; i > 0; i--) {
+        char tmp[MUSIC_PATH_MAX];
+        int  j = rand() % (i + 1);
+
+        memcpy(tmp, SHUF_PATH(i), MUSIC_PATH_MAX);
+        memmove(SHUF_PATH(i), SHUF_PATH(j), MUSIC_PATH_MAX);
+        memcpy(SHUF_PATH(j), tmp, MUSIC_PATH_MAX);
+    }
+
+    strncpy(s_cwd, saved_cwd, MUSIC_PATH_MAX - 1);
+    s_cwd[MUSIC_PATH_MAX - 1] = '\0';
+    (void)scan_cwd();
+    if (have_sel) {
+        int idx = index_of_path(saved_sel);
+        if (idx >= 0)
+            s_selected = idx;
+    }
+
+    return s_shuf_n;
+}
+
+const char *musiclist_shuffle_next(void)
+{
+    if (s_shuf_paths == NULL || s_shuf_pos >= s_shuf_n)
+        return NULL;
+    return SHUF_PATH(s_shuf_pos++);
+}
+
+void musiclist_shuffle_mark_played(const char *path)
+{
+    int i;
+
+    if (path == NULL || s_shuf_paths == NULL)
+        return;
+    for (i = s_shuf_pos; i < s_shuf_n; i++) {
+        if (strcmp(SHUF_PATH(i), path) != 0)
+            continue;
+        if (i != s_shuf_pos) {
+            char tmp[MUSIC_PATH_MAX];
+
+            memcpy(tmp, SHUF_PATH(i), MUSIC_PATH_MAX);
+            memcpy(SHUF_PATH(i), SHUF_PATH(s_shuf_pos), MUSIC_PATH_MAX);
+            memcpy(SHUF_PATH(s_shuf_pos), tmp, MUSIC_PATH_MAX);
+        }
+        s_shuf_pos++;
+        return;
+    }
+}
+
+void musiclist_shuffle_forget(const char *path)
+{
+    size_t n;
+    int    i;
+
+    if (path == NULL || s_shuf_paths == NULL)
+        return;
+    n = strlen(path);
+    for (i = s_shuf_n - 1; i >= 0; i--) {
+        const char *e = SHUF_PATH(i);
+
+        /* Exact file, or anything inside a deleted folder. */
+        if (strncmp(e, path, n) != 0 || (e[n] != '\0' && e[n] != '/'))
+            continue;
+        memmove(SHUF_PATH(i), SHUF_PATH(i + 1),
+                (size_t)(s_shuf_n - 1 - i) * MUSIC_PATH_MAX);
+        s_shuf_n--;
+        if (i < s_shuf_pos)
+            s_shuf_pos--;
+    }
 }
 
 const char *musiclist_prev_file_before(const char *path)

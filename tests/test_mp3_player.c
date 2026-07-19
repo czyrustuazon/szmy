@@ -232,6 +232,10 @@ static void test_plays_mini_fixture(void)
     /* Non-aligned length → partial final wavebuf */
     if ((host_pcm_samples_fed() % 4096u) != 0)
         TEST_ASSERT_LESS_THAN(4096, (int)host_pcm_last_chunk_samples());
+    /* Natural end: duration snapped to played total → seek ratio is 1.0. */
+    TEST_ASSERT_EQUAL_INT64((int64_t)host_pcm_samples_fed(),
+                            audio_ctrl_duration_samples());
+    TEST_ASSERT_EQUAL_FLOAT(1.0f, audio_progress_ratio());
 }
 
 static void test_decode_yields_when_ring_full(void)

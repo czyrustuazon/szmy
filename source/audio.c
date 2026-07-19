@@ -7,12 +7,26 @@
 #include "audio.h"
 #include "audio_ctrl.h"
 #include "audio_ctrl_internal.h"
+#include "audio_viz.h"
 #include "file_magic.h"
 #include "libvgmstream.h"
+#include "pcm_ring.h"
 
-#define SAMPLES_PER_BUF  (1600)
+#define SAMPLES_PER_BUF  (4096)
 #define N_WAVEBUFS       (4)
-#define PLAYBACK_YIELD_US  (8000)
+/* Ring buffer: ~2 s stereo @ 44.1 kHz, same decode-ahead slack as FLAC.
+ * WAV pulls ~176 KB/s straight off the SD card, and SD reads stall for
+ * hundreds of ms at times; the old inline-decode path had only the wavebuf
+ * queue (~370 ms) to ride that out, which is why WAV alone stuttered. */
+#define RING_BYTES       (384 * 1024)
+#define DECODE_STACK     0x8000
+/* svcSleepThread takes nanoseconds; 8 ms per idle pass vs a ~93 ms buffer
+ * period. (The old value 8000 was meant as µs but slept 8 µs — a busy poll.) */
+#define PLAYBACK_YIELD_NS  (8000000LL)
+
+/* Higher priority than the UI/main thread (0x30): keeping NDSP fed wins
+ * over drawing; the loop sleeps every pass, so the UI is never starved. */
+#define PLAYBACK_THREAD_PRIO 0x2C
 
 static bool g_audio_initialized = false;
 static char g_play_path[256];
@@ -65,7 +79,8 @@ static int start_playback_thread(int keep_resume)
 {
     audio_ctrl_prepare_async(keep_resume);
 
-    if (!threadCreate(playback_thread_func, NULL, 0x8000, 0x30, -1, true))
+    if (!threadCreate(playback_thread_func, NULL, 0x8000,
+                      PLAYBACK_THREAD_PRIO, -1, true))
         return -7;
     return 0;
 }
@@ -166,6 +181,58 @@ int audio_play_file_async(const char *path)
 static ndspWaveBuf g_waveBufs[N_WAVEBUFS];
 static int g_channel_used = -1;
 
+/* Decode-ahead ring shared between the vgmstream decode thread (producer,
+ * does the SD reads) and the playback loop (consumer, feeds NDSP). Same
+ * scheme as the FLAC player. */
+typedef struct {
+    libvgmstream_t *vg;
+    unsigned int    channels;
+    uint8_t        *ring;
+    size_t          ring_size;
+    size_t          chunk_bytes;   /* bytes per decode chunk */
+    volatile size_t write_pos;
+    volatile size_t read_pos;
+    volatile bool   decode_done;
+    volatile bool   stop;
+    LightLock       lock;
+} vgm_ring_t;
+
+static void vgm_decode_thread(void *arg)
+{
+    vgm_ring_t *r = (vgm_ring_t *)arg;
+    int16_t    *decode_buf = (int16_t *)linearAlloc(r->chunk_bytes);
+
+    if (!decode_buf) {
+        r->decode_done = true;
+        return;
+    }
+
+    while (!r->stop && !audio_playback_should_exit()) {
+        if (pcm_ring_producer_full(r->write_pos, r->read_pos,
+                                   r->ring_size, r->chunk_bytes)) {
+            svcSleepThread(1000000); /* 1 ms: ring full, let consumer drain */
+            continue;
+        }
+
+        int got = libvgmstream_fill(r->vg, decode_buf, SAMPLES_PER_BUF);
+        if (got <= 0) {
+            if (r->vg->decoder->done)
+                break;
+            svcSleepThread(1000000);
+            continue;
+        }
+
+        size_t to_write = (size_t)got * r->channels * sizeof(int16_t);
+        pcm_ring_write(r->ring, r->ring_size, r->write_pos,
+                       decode_buf, to_write);
+        LightLock_Lock(&r->lock);
+        r->write_pos += to_write;
+        LightLock_Unlock(&r->lock);
+    }
+    r->decode_done = true;
+    linearFree(decode_buf);
+}
+
 int audio_play_file(const char *path)
 {
     if (!path || !g_audio_initialized)
@@ -176,11 +243,14 @@ int audio_play_file(const char *path)
         return audio_play_flac(path);
     case AUDIO_ROUTE_MP3:
         return audio_play_mp3(path);
+    case AUDIO_ROUTE_OPUS:
+        return audio_play_opus(path);
     default:
         break;
     }
 
     audio_ctrl_clear_exit_flags();
+    audio_viz_reset();
 
     libstreamfile_t *libsf = libstreamfile_open_from_stdio(path);
     if (!libsf)
@@ -193,12 +263,11 @@ int audio_play_file(const char *path)
     if (!vg)
         return -3;
 
-    {
-        int64_t resume = audio_take_resume_sample();
-        if (resume >= 0) {
-            libvgmstream_seek(vg, resume);
-            audio_ctrl_set_position(resume);
-        }
+    int64_t resume   = audio_take_resume_sample();
+    int     resuming = (resume >= 0);
+    if (resuming) {
+        libvgmstream_seek(vg, resume);
+        audio_ctrl_set_position(resume);
     }
 
     const libvgmstream_format_t *fmt = vg->format;
@@ -214,6 +283,30 @@ int audio_play_file(const char *path)
         if (dur <= 0)
             dur = fmt->stream_samples;
         audio_ctrl_set_duration(dur);
+        audio_ctrl_set_sample_rate(sr);
+    }
+
+    size_t chunk_bytes = (size_t)SAMPLES_PER_BUF * (size_t)ch * sizeof(int16_t);
+
+    vgm_ring_t ring = {0};
+    ring.vg          = vg;
+    ring.channels    = (unsigned int)ch;
+    ring.chunk_bytes = chunk_bytes;
+    ring.ring_size   = RING_BYTES;
+    ring.ring        = (uint8_t *)linearAlloc(ring.ring_size);
+    if (!ring.ring) {
+        libvgmstream_free(vg);
+        return -5;
+    }
+    LightLock_Init(&ring.lock);
+
+    /* Decode (and all SD reads) off the playback loop; -1 = any core. */
+    Thread th = threadCreate(vgm_decode_thread, &ring, DECODE_STACK,
+                             0x30, -1, false);
+    if (!th) {
+        linearFree(ring.ring);
+        libvgmstream_free(vg);
+        return -6;
     }
 
     int ndsp_format = (ch == 2) ? NDSP_FORMAT_STEREO_PCM16 : NDSP_FORMAT_MONO_PCM16;
@@ -225,66 +318,128 @@ int audio_play_file(const char *path)
     ndspChnSetMix(channel_id, (float[12]){ 1.0f, 1.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
     g_channel_used = channel_id;
 
-    size_t buf_samples = SAMPLES_PER_BUF * ch;
-    size_t buf_bytes   = buf_samples * 2;
+    size_t buf_bytes = chunk_bytes;
     void *bufs[N_WAVEBUFS];
     for (int i = 0; i < N_WAVEBUFS; i++) {
         bufs[i] = linearAlloc(buf_bytes);
         if (!bufs[i]) {
+            ring.stop = true;
+            threadJoin(th, U64_MAX);
+            threadFree(th);
             for (int j = 0; j < i; j++)
                 linearFree(bufs[j]);
+            linearFree(ring.ring);
             libvgmstream_free(vg);
-            return -5;
+            g_channel_used = -1;
+            return -7;
         }
         memset(&g_waveBufs[i], 0, sizeof(ndspWaveBuf));
         g_waveBufs[i].data_vaddr = bufs[i];
-        g_waveBufs[i].nsamples   = SAMPLES_PER_BUF;
-        g_waveBufs[i].status      = NDSP_WBUF_FREE;
+        g_waveBufs[i].status     = NDSP_WBUF_FREE;
     }
 
-    int next_buf = 0;
-    int ret = 0;
-    bool stream_done = false;
-
+    /* Pre-fill before first output; keep resume start short. */
+    size_t prefill = pcm_ring_prefill_target(resuming, chunk_bytes,
+                                             (unsigned)sr, (unsigned)ch,
+                                             ring.ring_size);
     while (!audio_playback_should_exit()) {
-        bool progressed = false;
-        if (!stream_done) {
-            ndspWaveBuf *wb = &g_waveBufs[next_buf];
-            if (wb->status == NDSP_WBUF_FREE || wb->status == NDSP_WBUF_DONE) {
-                int got = libvgmstream_fill(vg, bufs[next_buf], SAMPLES_PER_BUF);
-                if (got <= 0) {
-                    if (vg->decoder->done)
-                        stream_done = true;
-                } else {
-                    wb->nsamples = got;
-                    wb->status   = NDSP_WBUF_FREE;
-                    DSP_FlushDataCache(bufs[next_buf], buf_bytes);
-                    ndspChnWaveBufAdd(channel_id, wb);
-                    next_buf = (next_buf + 1) % N_WAVEBUFS;
-                    progressed = true;
-                    audio_ctrl_set_position(libvgmstream_get_play_position(vg));
-                }
-            }
-        }
-        if (stream_done) {
-            bool all_done = true;
-            for (int i = 0; i < N_WAVEBUFS; i++)
-                if (g_waveBufs[i].status == NDSP_WBUF_PLAYING)
-                    all_done = false;
-            if (all_done)
-                break;
-        }
-        if (!progressed)
-            svcSleepThread(PLAYBACK_YIELD_US);
+        LightLock_Lock(&ring.lock);
+        size_t avail = pcm_ring_avail(ring.write_pos, ring.read_pos);
+        LightLock_Unlock(&ring.lock);
+        if (avail >= prefill || ring.decode_done)
+            break;
+        svcSleepThread(100000); /* 100 µs */
     }
 
-    if (audio_end_is_pause())
-        audio_note_paused_at(libvgmstream_get_play_position(vg));
+    int next = 0;
+    bool stream_done = false;
+    uint64_t samples_fed = resuming ? (uint64_t)resume : 0;
 
+    while (!stream_done && !audio_playback_should_exit()) {
+        ndspWaveBuf *wb = &g_waveBufs[next];
+        if (wb->status == NDSP_WBUF_FREE || wb->status == NDSP_WBUF_DONE) {
+            LightLock_Lock(&ring.lock);
+            size_t avail = pcm_ring_avail(ring.write_pos, ring.read_pos);
+            LightLock_Unlock(&ring.lock);
+            if (avail >= chunk_bytes) {
+                pcm_ring_read(ring.ring, ring.ring_size, ring.read_pos,
+                              bufs[next], chunk_bytes);
+                LightLock_Lock(&ring.lock);
+                ring.read_pos += chunk_bytes;
+                LightLock_Unlock(&ring.lock);
+                wb->nsamples = SAMPLES_PER_BUF;
+                audio_viz_feed((const int16_t *)bufs[next],
+                               SAMPLES_PER_BUF, (unsigned int)ch, sr);
+                DSP_FlushDataCache(bufs[next], buf_bytes);
+                ndspChnWaveBufAdd(channel_id, wb);
+                samples_fed += SAMPLES_PER_BUF;
+                audio_ctrl_set_position((int64_t)samples_fed);
+                next = (next + 1) % N_WAVEBUFS;
+            } else if (ring.decode_done) {
+                /* Partial last chunk or exact end. */
+                if (avail > 0) {
+                    size_t frame_bytes = (size_t)ch * sizeof(int16_t);
+                    size_t samples;
+                    size_t rp_snap;
+
+                    LightLock_Lock(&ring.lock);
+                    rp_snap = ring.read_pos;
+                    samples = pcm_ring_pop_partial(
+                        ring.ring, ring.ring_size, ring.write_pos, &rp_snap,
+                        bufs[next], chunk_bytes, frame_bytes);
+                    ring.read_pos = rp_snap;
+                    LightLock_Unlock(&ring.lock);
+                    wb->nsamples = (u32)samples;
+                    audio_viz_feed((const int16_t *)bufs[next],
+                                   samples, (unsigned int)ch, sr);
+                    DSP_FlushDataCache(bufs[next], buf_bytes);
+                    ndspChnWaveBufAdd(channel_id, wb);
+                    samples_fed += samples;
+                    audio_ctrl_set_position((int64_t)samples_fed);
+                    next = (next + 1) % N_WAVEBUFS;
+                }
+                stream_done = true;
+            } else {
+                svcSleepThread(PLAYBACK_YIELD_NS);
+            }
+        } else {
+            LightLock_Lock(&ring.lock);
+            size_t a = pcm_ring_avail(ring.write_pos, ring.read_pos);
+            LightLock_Unlock(&ring.lock);
+            if (ring.decode_done && a == 0)
+                stream_done = true;
+            else
+                svcSleepThread(PLAYBACK_YIELD_NS);
+        }
+    }
+
+    /* Let the queued tail play out on a natural end (not stop/pause). */
+    if (stream_done && !audio_playback_should_exit()) {
+        bool draining = true;
+        while (draining && !audio_playback_should_exit()) {
+            draining = false;
+            for (int i = 0; i < N_WAVEBUFS; i++)
+                if (g_waveBufs[i].status == NDSP_WBUF_PLAYING
+                    || g_waveBufs[i].status == NDSP_WBUF_QUEUED)
+                    draining = true;
+            if (draining)
+                svcSleepThread(PLAYBACK_YIELD_NS);
+        }
+    }
+
+    ring.stop = true;
+    int pausing = audio_end_is_pause();
+    threadJoin(th, U64_MAX);
+    threadFree(th);
     ndspChnWaveBufClear(channel_id);
+
+    if (pausing)
+        audio_note_paused_at((int64_t)samples_fed);
+
     for (int i = 0; i < N_WAVEBUFS; i++)
         linearFree(bufs[i]);
+    linearFree(ring.ring);
     libvgmstream_free(vg);
     g_channel_used = -1;
-    return ret;
+    return 0;
 }

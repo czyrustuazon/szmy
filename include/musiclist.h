@@ -24,6 +24,10 @@ int musiclist_selected_is_dir(void);
 /* Full path of the selected entry, or NULL if the list is empty. */
 const char *musiclist_selected_path(void);
 
+/* Open the containing folder and move the cursor to `path`.
+ * Returns 0 when the playable file was found, -1 otherwise. */
+int musiclist_select_path(const char *path);
+
 /* Enter the selected folder. Returns 0 on success, negative on error. */
 int musiclist_enter(void);
 
@@ -43,14 +47,44 @@ const char *musiclist_cwd(void);
  * help may be NULL to use "A=yes  B=cancel". */
 void musiclist_set_prompt(const char *msg, const char *help);
 
-/* Delete a file on SD and refresh the current folder list. 0 = ok. */
+/* Delete an entry on SD and refresh the current folder list. Directories are
+ * removed recursively. 0 = ok. */
+int musiclist_delete_entry(const char *path, int is_dir);
+
+/* Backward-compatible file-only wrapper. */
 int musiclist_delete_file(const char *path);
+
+/* Rescan the current folder without resetting the library root. 0 = ok. */
+int musiclist_refresh(void);
 
 /* Select next/prev audio file after `path` (depth-first across folders).
  * Climbs toward music root when a folder ends; does not wrap. Updates selection.
  * NULL if none. */
 const char *musiclist_next_file_after(const char *path);
 const char *musiclist_prev_file_before(const char *path);
+
+/* First playable file in the whole library (from the music root), entering
+ * subfolders as needed. Used for repeat-all wraparound. NULL if none. */
+const char *musiclist_first_file(void);
+
+/* Shuffle cycle: snapshot every file in the library in random order.
+ * Each track is handed out exactly once per cycle.
+ *
+ * musiclist_shuffle_start rebuilds the cycle (restarting any current one)
+ * and returns the number of tracks (0 = empty library).
+ * musiclist_shuffle_next returns the next unplayed track, or NULL when the
+ * cycle is exhausted; call start again to begin a new cycle.
+ * musiclist_shuffle_mark_played counts a manually chosen track as played so
+ * it does not come up again this cycle (no-op if unknown/already played).
+ * musiclist_shuffle_forget drops a deleted file (or every file under a
+ * deleted folder) from the cycle so it can never be handed out again.
+ * musiclist_shuffle_stop discards the cycle and its played history. */
+int  musiclist_shuffle_start(void);
+void musiclist_shuffle_stop(void);
+int  musiclist_shuffle_active(void);
+const char *musiclist_shuffle_next(void);
+void musiclist_shuffle_mark_played(const char *path);
+void musiclist_shuffle_forget(const char *path);
 
 /* Redraw the list on the top screen console. Pass playback state for the status line. */
 void musiclist_draw(PrintConsole *top, int playing, int paused);

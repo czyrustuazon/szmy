@@ -38,10 +38,13 @@ Parallel jobs are on by default (`nproc`). Override with `make -j4` or `make JOB
 | FLAC magic / route pick | `source/file_magic.c` | Real temp files |
 | PCM ring buffer | `source/pcm_ring.c` | Synthetic byte patterns (wrap, partial drain) |
 | Music browser logic | `source/musiclist.c` | Real temp directories (`mkdtemp`) |
+| EQ / scope viz | `source/audio_viz.c` | Synthetic PCM sine/square windows |
+| FTP path/auth helpers | `source/ftp_server.c` | String / auth unit tests (socket loop is 3DS-only) |
 | MP3 player | `source/mp3_player.c` | `fixtures/mini.mp3` + **host NDSP/thread mocks** |
 | FLAC player | `source/flac_player.c` | **Host dr_flac stub** + NDSP/thread mocks |
+| Opus player | `source/opus_player.c` | **Host libopusfile stub** + NDSP/thread mocks |
 
-**~157 tests** across **11 runners**. The coverage gate requires **100% line and function** coverage on these production sources (branch coverage is reported, not gated). Test / Unity / minimp3 paths are stripped from the lcov report.
+**~180+ tests** across **15 runners**. The coverage gate requires **100% line and function** coverage on these production sources (branch coverage is reported, not gated). Test / Unity / minimp3 paths are stripped from the lcov report.
 
 ## What is *not* covered (and why)
 
@@ -61,9 +64,10 @@ Host tests do **not** replace on-device checks for DSP timing, GPU, or real SDMC
 | `3ds.h` | Stub libctru types (Thread, NDSP, `linearAlloc`, …) |
 | `host_mocks.c` | pthread threads, malloc alloc, **PCM capture sink** |
 | `host_drflac.c` | Fake `drflac_*` for FLAC player control-flow tests |
+| `host_opusfile.c` / `host_opusfile.h` | Fake `op_*` for Opus player control-flow tests |
 | `dirent_compat.h` | `DT_*` helpers for directory scanning tests |
 
-MP3 tests use **real minimp3** decode on `fixtures/mini.mp3`. FLAC tests use the stub decoder so playback logic is exercised without a binary FLAC fixture.
+MP3 tests use **real minimp3** decode on `fixtures/mini.mp3`. FLAC and Opus tests use stub decoders so playback logic is exercised without binary fixtures.
 
 ## Are mocked tests valid?
 

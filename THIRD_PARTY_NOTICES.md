@@ -6,7 +6,8 @@ in the referenced files or upstream repositories.
 
 ## szmy application code
 
-Copyright (c) 2026 zaccken. Licensed under the zlib License. See `LICENSE`.
+Copyright (c) 2026 Czyrus Tuazon (CyT / zaccken). Licensed under the zlib
+License. See `LICENSE`.
 
 ---
 
@@ -54,6 +55,13 @@ Copyright (c) 2026 zaccken. Licensed under the zlib License. See `LICENSE`.
 - **Source:** https://github.com/mackron/dr_libs (dr_flac)
 - **In tree:** `include/dr_flac.h` (license text at end of file)
 
+### stb_image
+
+- **Use:** Decode embedded album art (JPEG/PNG) in `source/trackmeta.c`
+- **License:** Public domain / MIT dual (see notice in the header)
+- **Source:** https://github.com/nothings/stb (stb_image.h)
+- **In tree:** `include/stb_image.h`
+
 ### libmpg123 (optional)
 
 - **Use:** Only if `libmpg123.a` is present when building; enables vgmstream
@@ -61,6 +69,13 @@ Copyright (c) 2026 zaccken. Licensed under the zlib License. See `LICENSE`.
   current builds (minimp3 path in `source/mp3_player.c`).
 - **License:** LGPL 2.1 (typical for mpg123; verify your portlibs package)
 - **Package:** devkitPro `3ds-mpg123` portlib
+
+### libopusfile / libopus / libogg (optional)
+
+- **Use:** Only if `libopusfile.a` is present when building (`ENABLE_OPUS=1`);
+  dedicated Opus playback in `source/opus_player.c`.
+- **License:** BSD-style (opusfile / opus / libogg; verify your portlibs packages)
+- **Package:** devkitPro `3ds-opusfile` (pulls `3ds-opus` and `3ds-libogg`)
 
 ### Newlib / compiler runtime
 
@@ -92,6 +107,24 @@ Copyright (c) 2026 zaccken. Licensed under the zlib License. See `LICENSE`.
 - **License:** See devkitPro / makerom upstream (GPL applies to the tool itself;
   not embedded in the homebrew binary)
 
+### Unity (host tests only)
+
+- **Use:** C unit test framework under `tests/` (not linked into the 3DS app)
+- **License:** MIT
+- **Source:** https://github.com/ThrowTheSwitch/Unity
+- **In tree:** `tests/third_party/unity/`
+
+---
+
+## Test fixtures
+
+### SoundHelix example clip
+
+- **Use:** `tests/fixtures/mini.mp3` (trimmed) for host MP3 decode tests
+- **License / terms:** Free for any use with credit to SoundHelix and the artist
+  (T. Schürger). See https://www.soundhelix.com/audio-examples
+- **Credit:** SoundHelix — T. Schürger
+
 ---
 
 ## devkitPro trademark notice
@@ -110,8 +143,9 @@ your product name or marketing without separate permission.
 
 If you distribute szmy binaries, you may include a short notice such as:
 
-> szmy — Copyright (c) 2026 zaccken (zlib License).
-> Uses libctru, citro2d, citro3d, vgmstream, dr_flac, and minimp3.
+> szmy — Copyright (c) 2026 Czyrus Tuazon (CyT / zaccken) (zlib License).
+> Uses libctru, citro2d, citro3d, vgmstream, dr_flac, minimp3, and optionally
+> libopusfile / libopus / libogg.
 > See THIRD_PARTY_NOTICES.md for details.
 
 ---

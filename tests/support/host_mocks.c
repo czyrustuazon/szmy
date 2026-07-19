@@ -209,10 +209,11 @@ void svcSleepThread(u64 nanoseconds)
         nanosleep(&ts, NULL);
     }
 #endif
-    /* Only the consumer's PLAYBACK_YIELD_US (~8000) may release held buffers.
-     * Decode throttle sleeps are longer; releasing there cleared PLAYING before
-     * next wrapped back, so decode_done==false on the busy path never ran. */
-    if (!g_wavebuf_persist && g_playing_count > 0 && nanoseconds <= 8000ull)
+    /* Only the consumer's PLAYBACK_YIELD_NS (8 ms) may release held buffers.
+     * Decode/prefill sleeps use other durations; releasing there cleared
+     * PLAYING before next wrapped back, so decode_done==false on the busy
+     * path never ran. */
+    if (!g_wavebuf_persist && g_playing_count > 0 && nanoseconds == 8000000ull)
         host_mock_release_one_playing();
 }
 
