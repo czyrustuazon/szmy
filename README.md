@@ -24,7 +24,7 @@ Supports **WAV, FLAC, Opus** (optional), **MP3** (optional), **BRSTM/BCSTM/BFSTM
 From a fresh clone (devkitPro MSYS2 shell on Windows):
 
 ```bash
-git clone https://github.com/ctdeeds/szmy.git
+git clone https://github.com/czyrustuazon/szmy.git
 cd szmy
 pacman -S --needed gcc make lcov          # host tests / coverage gate
 # optional: pacman -S --needed 3ds-opusfile 3ds-mpg123
