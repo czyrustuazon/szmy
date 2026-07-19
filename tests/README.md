@@ -25,6 +25,18 @@ Requires: `gcc`, `make`, `lcov` (e.g. `pacman -S --needed gcc make lcov` in the 
 
 Parallel jobs are on by default (`nproc`). Override with `make -j4` or `make JOBS=8`.
 
+### Windows: Smart App Control
+
+If runners fail with:
+
+```text
+/bin/sh: ... build/test_….exe: Permission denied
+make: *** [Makefile:…: test] Error 126
+```
+
+turn **Smart App Control** **Off**: Windows Security → App & browser control → Smart App Control settings.  
+Evaluation/On blocks unsigned MSYS-built test `.exe` files. Regular Microsoft Defender stays on.
+
 ## What is covered
 
 | Module | File | How tested |
