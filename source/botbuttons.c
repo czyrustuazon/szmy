@@ -971,6 +971,9 @@ static void activate_widget(int id)
             if (path != NULL) {
                 (void)audio_play_file_async(path);
                 musiclist_shuffle_mark_played(path);
+            } else if (musiclist_count() > 0
+                       && !musiclist_selected_is_dir()) {
+                toast_show("NOT MUSIC");
             }
         }
         break;

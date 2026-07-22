@@ -50,10 +50,32 @@ static int       s_selected;
 static char      s_prompt[96];
 static char      s_prompt_help[64];
 static int       s_have_prompt;
+static char      s_reject[48];
+static int       s_have_reject;
 
 static void invalidate_draw(void)
 {
     (void)0;
+}
+
+static void clear_reject(void)
+{
+    s_have_reject = 0;
+    s_reject[0]   = '\0';
+}
+
+static void set_reject(const char *msg)
+{
+    strncpy(s_reject, msg, sizeof(s_reject) - 1);
+    s_reject[sizeof(s_reject) - 1] = '\0';
+    s_have_reject = 1;
+}
+
+/* True when list index i is an audio file we may play / auto-advance to. */
+static int entry_is_audio(int i)
+{
+    return i >= 0 && i < s_count && s_kinds[i] == ENTRY_FILE
+        && path_is_audio_extension(s_names[i]);
 }
 
 static int entry_is_dir(const char *path, const struct dirent *ent)
@@ -126,6 +148,9 @@ static int g_scan_inj_active;
 static int g_scan_cap;
 static int g_enter_fail_after;
 
+static char g_init_prefer[MUSIC_PATH_MAX];
+static char g_init_root[MUSIC_PATH_MAX];
+
 void musiclist_test_clear_scan_inject(void)
 {
     g_scan_inj_n        = 0;
@@ -133,6 +158,24 @@ void musiclist_test_clear_scan_inject(void)
     g_scan_inj_active   = 0;
     g_scan_cap          = 0;
     g_enter_fail_after  = 0;
+    g_init_prefer[0]    = '\0';
+    g_init_root[0]      = '\0';
+}
+
+void musiclist_test_set_init_paths(const char *prefer, const char *root)
+{
+    if (prefer && prefer[0]) {
+        strncpy(g_init_prefer, prefer, MUSIC_PATH_MAX - 1);
+        g_init_prefer[MUSIC_PATH_MAX - 1] = '\0';
+    } else {
+        g_init_prefer[0] = '\0';
+    }
+    if (root && root[0]) {
+        strncpy(g_init_root, root, MUSIC_PATH_MAX - 1);
+        g_init_root[MUSIC_PATH_MAX - 1] = '\0';
+    } else {
+        g_init_root[0] = '\0';
+    }
 }
 
 void musiclist_test_add_scan_entry(const char *name, unsigned char d_type)
@@ -186,7 +229,8 @@ static struct dirent *scan_next_ent(DIR *dir)
 }
 #endif
 
-/* Classify a dirent into ENTRY_DIR / ENTRY_FILE. Returns 0 to skip. */
+/* Classify a dirent into ENTRY_DIR / ENTRY_FILE. Returns 0 to skip.
+ * All regular files are listed; playback is gated by path_is_audio_extension. */
 static int classify_dirent(const char *full, const struct dirent *ent,
                            EntryKind *out)
 {
@@ -194,16 +238,18 @@ static int classify_dirent(const char *full, const struct dirent *ent,
         *out = ENTRY_DIR;
         return 1;
     }
-    if (ent->d_type == DT_REG && path_is_audio_extension(ent->d_name)) {
+    if (ent->d_type == DT_REG) {
         *out = ENTRY_FILE;
         return 1;
     }
     if (ent->d_type == DT_UNKNOWN) {
+        struct stat st;
+
         if (entry_is_dir(full, ent)) {
             *out = ENTRY_DIR;
             return 1;
         }
-        if (path_is_audio_extension(ent->d_name)) {
+        if (stat(full, &st) == 0 && S_ISREG(st.st_mode)) {
             *out = ENTRY_FILE;
             return 1;
         }
@@ -263,6 +309,7 @@ int musiclist_open(const char *dir)
 {
     if (!dir)
         return -1;
+    clear_reject();
     strncpy(s_cwd, dir, MUSIC_PATH_MAX - 1);
     s_cwd[MUSIC_PATH_MAX - 1] = '\0';
     strncpy(s_root, dir, MUSIC_PATH_MAX - 1);
@@ -273,13 +320,30 @@ int musiclist_open(const char *dir)
 
 int musiclist_init(void)
 {
-    return musiclist_open(MUSIC_DIR_FS);
+    const char *prefer = MUSIC_DIR_FS;
+    const char *root   = FS_ROOT_FS;
+
+#ifdef UNIT_TEST
+    if (g_init_prefer[0])
+        prefer = g_init_prefer;
+    if (g_init_root[0])
+        root = g_init_root;
+#endif
+
+    /* Land in /music when it exists, but always allow browsing the whole SD. */
+    if (musiclist_open(prefer) == 0) {
+        strncpy(s_root, root, MUSIC_PATH_MAX - 1);
+        s_root[MUSIC_PATH_MAX - 1] = '\0';
+        return 0;
+    }
+    return musiclist_open(root);
 }
 
 void musiclist_exit(void)
 {
     musiclist_shuffle_stop();
     clear_list();
+    clear_reject();
     s_cwd[0] = '\0';
     s_root[0] = '\0';
 }
@@ -298,6 +362,7 @@ void musiclist_select_prev(void)
 {
     if (s_count == 0)
         return;
+    clear_reject();
     s_selected = (s_selected - 1 + s_count) % s_count;
 }
 
@@ -305,6 +370,7 @@ void musiclist_select_next(void)
 {
     if (s_count == 0)
         return;
+    clear_reject();
     s_selected = (s_selected + 1) % s_count;
 }
 
@@ -505,7 +571,7 @@ int musiclist_select_path(const char *path)
     s_cwd[sizeof(s_cwd) - 1] = '\0';
     if (scan_cwd() == 0) {
         idx = index_of_path(path);
-        if (idx >= 0 && s_kinds[idx] == ENTRY_FILE) {
+        if (idx >= 0 && entry_is_audio(idx)) {
             s_selected = idx;
             return 0;
         }
@@ -543,7 +609,7 @@ static const char *first_file_in_cwd_recursive(void)
             i = index_of_path(left);
             continue;
         }
-        if (s_kinds[i] == ENTRY_FILE) {
+        if (entry_is_audio(i)) {
             s_selected = i;
             return s_paths[i];
         }
@@ -557,7 +623,7 @@ static const char *last_file_in_cwd_recursive(void)
     int i;
 
     for (i = s_count - 1; i >= 0; i--) {
-        if (s_kinds[i] == ENTRY_FILE) {
+        if (entry_is_audio(i)) {
             s_selected = i;
             return s_paths[i];
         }
@@ -587,7 +653,7 @@ static const char *next_after_index(int after)
     int i;
 
     for (i = after + 1; i < s_count; i++) {
-        if (s_kinds[i] == ENTRY_FILE) {
+        if (entry_is_audio(i)) {
             s_selected = i;
             return s_paths[i];
         }
@@ -617,7 +683,7 @@ static const char *prev_before_index(int before)
     int i;
 
     for (i = before - 1; i >= 0; i--) {
-        if (s_kinds[i] == ENTRY_FILE) {
+        if (entry_is_audio(i)) {
             s_selected = i;
             return s_paths[i];
         }
@@ -921,6 +987,8 @@ int musiclist_shuffle_poll(void)
 
     for (i = 0; i < count; i++) {
         if (kinds[i] == ENTRY_FILE) {
+            if (!path_is_audio_extension(names[i]))
+                continue;
             if (shuf_build_append(paths[i]) != 0) {
                 /* LCOV_EXCL_START */
                 musiclist_shuffle_stop();
@@ -1052,6 +1120,7 @@ int musiclist_enter(void)
     if (s_count == 0 || s_kinds[s_selected] != ENTRY_DIR)
         return -1;
 
+    clear_reject();
     strncpy(prev, s_cwd, MUSIC_PATH_MAX - 1);
     prev[MUSIC_PATH_MAX - 1] = '\0';
     strncpy(s_cwd, s_paths[s_selected], MUSIC_PATH_MAX - 1);
@@ -1072,12 +1141,17 @@ int musiclist_activate(void)
         return -1;
     if (s_kinds[s_selected] == ENTRY_DIR)
         return musiclist_enter() == 0 ? 1 : -1;
+    if (!entry_is_audio(s_selected)) {
+        set_reject("Not a music file");
+        return -2;
+    }
+    clear_reject();
     return 0;
 }
 
 const char *musiclist_play_path(void)
 {
-    if (s_count == 0 || s_kinds[s_selected] == ENTRY_DIR)
+    if (!entry_is_audio(s_selected))
         return NULL;
     return s_paths[s_selected];
 }
@@ -1091,6 +1165,7 @@ int musiclist_go_back(void)
     if (slash == NULL || slash == s_cwd)
         return -1;
 
+    clear_reject();
     *slash = '\0';
     if (strlen(s_cwd) < strlen(s_root) || strncmp(s_cwd, s_root, strlen(s_root)) != 0) {
         musiclist_open(s_root);
@@ -1144,6 +1219,11 @@ static void draw_status(int playing, int paused)
 
     if (s_have_prompt) {
         jptext_draw(JPTEXT_X, jptext_line_y(LINE_STATUS), CLR_SELECT, s_prompt);
+        return;
+    }
+
+    if (s_have_reject) {
+        jptext_draw(JPTEXT_X, jptext_line_y(LINE_STATUS), CLR_ERROR, s_reject);
         return;
     }
 

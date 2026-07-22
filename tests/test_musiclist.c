@@ -13,6 +13,7 @@ void musiclist_test_clear_scan_inject(void);
 void musiclist_test_add_scan_entry(const char *name, unsigned char d_type);
 void musiclist_test_set_scan_cap(int n);
 void musiclist_test_set_cwd_root(const char *cwd, const char *root);
+void musiclist_test_set_init_paths(const char *prefer, const char *root);
 
 void setUp(void)
 {
@@ -67,10 +68,10 @@ static void rm_tree(void)
 
 static void test_scan_finds_entries(void)
 {
-    /* Happy: dirs + audio files scanned; hidden/non-audio skipped */
+    /* Happy: dirs + all non-hidden files; .hidden skipped */
     TEST_ASSERT_EQUAL(0, make_temp_tree());
     TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
-    TEST_ASSERT_EQUAL(3, musiclist_count());
+    TEST_ASSERT_EQUAL(4, musiclist_count()); /* rock, alpha, readme, zebra */
     musiclist_exit();
     rm_tree();
 }
@@ -103,11 +104,14 @@ static void test_dirs_sort_before_files(void)
 
 static void test_files_sort_alphabetically(void)
 {
-    /* Happy: same-kind entries sort by name (alpha before zebra) */
+    /* Happy: same-kind entries sort by name (alpha, readme, zebra) */
     TEST_ASSERT_EQUAL(0, make_temp_tree());
     musiclist_open(g_root);
     musiclist_select_next(); /* first file */
     TEST_ASSERT_NOT_NULL(strstr(musiclist_play_path(), "alpha.flac"));
+    musiclist_select_next(); /* readme.txt — listed but not playable */
+    TEST_ASSERT_NULL(musiclist_play_path());
+    TEST_ASSERT_NOT_NULL(strstr(musiclist_selected_path(), "readme.txt"));
     musiclist_select_next();
     TEST_ASSERT_NOT_NULL(strstr(musiclist_play_path(), "zebra.wav"));
     musiclist_exit();
@@ -137,7 +141,7 @@ static void test_select_wraps(void)
     TEST_ASSERT_EQUAL(0, make_temp_tree());
     musiclist_open(g_root);
     musiclist_select_prev();
-    TEST_ASSERT_EQUAL(2, musiclist_get_selected());
+    TEST_ASSERT_EQUAL(3, musiclist_get_selected());
     musiclist_select_next();
     TEST_ASSERT_EQUAL(0, musiclist_get_selected());
     musiclist_exit();
@@ -186,9 +190,43 @@ static void test_open_null_dir(void)
 
 static void test_init_opens_default_music_dir(void)
 {
+    char prefer[256];
+    char root[256];
+    char *p;
+    char *r;
+
     /* Host has no sdmc:/music; musiclist_init should fail (and be exercised). */
     TEST_ASSERT_EQUAL(-1, musiclist_init());
     musiclist_exit();
+
+    /* Prefer folder exists: land there with browse root expanded. */
+    strcpy(root, "/tmp/szmy_ml_initr_XXXXXX");
+    r = mkdtemp(root);
+    TEST_ASSERT_NOT_NULL(r);
+    snprintf(prefer, sizeof(prefer), "%s/music", root);
+    TEST_ASSERT_EQUAL(0, mkdir(prefer, 0755));
+    musiclist_test_set_init_paths(prefer, root);
+    TEST_ASSERT_EQUAL(0, musiclist_init());
+    TEST_ASSERT_EQUAL_STRING(prefer, musiclist_cwd());
+    TEST_ASSERT_EQUAL(0, musiclist_go_back());
+    TEST_ASSERT_EQUAL_STRING(root, musiclist_cwd());
+    TEST_ASSERT_EQUAL(-1, musiclist_go_back());
+    musiclist_exit();
+    rmdir(prefer);
+    rmdir(root);
+
+    /* Prefer missing: open browse root directly. */
+    strcpy(prefer, "/tmp/szmy_ml_initp_XXXXXX");
+    p = mkdtemp(prefer);
+    TEST_ASSERT_NOT_NULL(p);
+    musiclist_test_set_init_paths("/tmp/szmy_ml_init_missing_xyz", prefer);
+    TEST_ASSERT_EQUAL(0, musiclist_init());
+    TEST_ASSERT_EQUAL_STRING(prefer, musiclist_cwd());
+    musiclist_exit();
+    rmdir(prefer);
+
+    musiclist_test_set_init_paths(NULL, NULL);
+    musiclist_test_set_init_paths("", "");
 }
 
 static void test_entry_is_dir_type_shortcuts(void)
@@ -223,10 +261,10 @@ static void test_scan_typed_dirent_branches(void)
 
     musiclist_test_add_scan_entry("rock", DT_DIR);
     musiclist_test_add_scan_entry("song.mp3", DT_REG);
-    musiclist_test_add_scan_entry("notes.txt", DT_REG); /* REG but non-audio → else */
+    musiclist_test_add_scan_entry("notes.txt", DT_REG); /* listed; play gated later */
     musiclist_test_add_scan_entry("pipe", DT_FIFO);     /* other type → else continue */
     TEST_ASSERT_EQUAL(0, musiclist_open(empty));
-    TEST_ASSERT_EQUAL(2, musiclist_count());
+    TEST_ASSERT_EQUAL(3, musiclist_count());
     TEST_ASSERT_TRUE(musiclist_selected_is_dir());
     musiclist_exit();
     rmdir(empty);
@@ -234,16 +272,20 @@ static void test_scan_typed_dirent_branches(void)
 
 static void test_scan_unknown_dirent_resolves(void)
 {
-    /* Happy/sad via DT_UNKNOWN: real dir, audio file, non-audio skipped */
+    /* Happy/sad via DT_UNKNOWN: real dir + regular files (audio and not) */
     TEST_ASSERT_EQUAL(0, make_temp_tree());
     musiclist_test_add_scan_entry("rock", DT_UNKNOWN);
     musiclist_test_add_scan_entry("alpha.flac", DT_UNKNOWN);
     musiclist_test_add_scan_entry("readme.txt", DT_UNKNOWN);
+    musiclist_test_add_scan_entry("missing_xyz", DT_UNKNOWN); /* not a file */
     TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
-    TEST_ASSERT_EQUAL(2, musiclist_count());
+    TEST_ASSERT_EQUAL(3, musiclist_count());
     TEST_ASSERT_TRUE(musiclist_selected_is_dir());
     musiclist_select_next();
     TEST_ASSERT_NOT_NULL(strstr(musiclist_play_path(), "alpha.flac"));
+    musiclist_select_next();
+    TEST_ASSERT_NULL(musiclist_play_path());
+    TEST_ASSERT_NOT_NULL(strstr(musiclist_selected_path(), "readme.txt"));
     musiclist_exit();
     rm_tree();
 }
@@ -318,7 +360,10 @@ static void test_activate_file_and_failed_enter(void)
     TEST_ASSERT_EQUAL(0, make_temp_tree());
     musiclist_open(g_root);
     musiclist_select_next();
-    TEST_ASSERT_EQUAL(0, musiclist_activate()); /* file selected */
+    TEST_ASSERT_EQUAL(0, musiclist_activate()); /* audio file selected */
+    musiclist_select_next(); /* readme.txt */
+    TEST_ASSERT_EQUAL(-2, musiclist_activate()); /* reject non-music */
+    TEST_ASSERT_NULL(musiclist_play_path());
     musiclist_exit();
     rm_tree();
 
@@ -520,9 +565,11 @@ static void test_next_crosses_into_parent(void)
     unlink(f);
     musiclist_exit();
     TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    /* Wrap past last entry back to rock, then land on alpha. */
     musiclist_select_next();
     musiclist_select_next();
-    musiclist_select_next(); /* toward alpha */
+    musiclist_select_next();
+    musiclist_select_next();
     while (musiclist_selected_is_dir())
         musiclist_select_next();
     prev = musiclist_prev_file_before(musiclist_selected_path());
@@ -585,8 +632,9 @@ static void test_next_prev_climb_edge_hooks(void)
 
     TEST_ASSERT_EQUAL(0, make_temp_tree());
     TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
-    musiclist_select_next();
-    musiclist_select_next(); /* zebra — last file */
+    while (!musiclist_selected_path()
+           || strstr(musiclist_selected_path(), "zebra.wav") == NULL)
+        musiclist_select_next();
     zebra = musiclist_selected_path();
     TEST_ASSERT_NOT_NULL(strstr(zebra, "zebra.wav"));
 
@@ -597,8 +645,9 @@ static void test_next_prev_climb_edge_hooks(void)
     /* Climb with a cwd not present in the parent listing → idx < 0 */
     musiclist_exit();
     TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
-    musiclist_select_next();
-    musiclist_select_next();
+    while (!musiclist_selected_path()
+           || strstr(musiclist_selected_path(), "zebra.wav") == NULL)
+        musiclist_select_next();
     zebra = musiclist_selected_path();
     snprintf(ghost, sizeof(ghost), "%s/ghost", g_root);
     musiclist_test_set_cwd_root(ghost, g_root);
@@ -743,8 +792,8 @@ static void test_delete_file_happy_and_sad(void)
     TEST_ASSERT_EQUAL(count_before - 1, musiclist_count());
 
     /* Happy: delete last listed audio (idx >= s_count after rescan) */
-    musiclist_select_next(); /* toward zebra; skip dir if needed */
-    while (musiclist_selected_is_dir())
+    while (!musiclist_selected_path()
+           || strstr(musiclist_selected_path(), "zebra.wav") == NULL)
         musiclist_select_next();
     path = musiclist_selected_path();
     TEST_ASSERT_NOT_NULL(strstr(path, "zebra.wav"));
@@ -821,7 +870,7 @@ static void test_delete_folder_recursive(void)
     TEST_ASSERT_TRUE(musiclist_selected_is_dir());
     TEST_ASSERT_EQUAL(0, musiclist_delete_entry(folder, 1));
     TEST_ASSERT_NOT_EQUAL(0, stat(folder, &st));
-    TEST_ASSERT_EQUAL(2, musiclist_count());
+    TEST_ASSERT_EQUAL(3, musiclist_count()); /* alpha, readme, zebra */
     TEST_ASSERT_FALSE(musiclist_selected_is_dir());
     TEST_ASSERT_NOT_NULL(strstr(musiclist_selected_path(), "alpha.flac"));
 
@@ -978,7 +1027,8 @@ static void test_shuffle_cycle(void)
     musiclist_exit();
     rm_tree();
 
-    /* Empty library: no cycle to build. */
+    /* Empty library: no cycle to build. Non-dirent types are skipped in the
+     * shuffle scanner the same way as in the UI list. */
     {
         char empty[256];
         char *q;
@@ -986,10 +1036,13 @@ static void test_shuffle_cycle(void)
         strcpy(empty, "/tmp/szmy_ml_shuf_XXXXXX");
         q = mkdtemp(empty);
         TEST_ASSERT_NOT_NULL(q);
+        musiclist_test_add_scan_entry("pipe", DT_FIFO);
         TEST_ASSERT_EQUAL(0, musiclist_open(empty));
+        TEST_ASSERT_EQUAL(0, musiclist_count());
         TEST_ASSERT_EQUAL(0, shuffle_start_complete());
         TEST_ASSERT_FALSE(musiclist_shuffle_active());
         musiclist_exit();
+        musiclist_test_clear_scan_inject();
         rmdir(empty);
     }
 
@@ -1183,6 +1236,12 @@ static void test_select_path_jumps_to_playing_file(void)
     snprintf(outside, sizeof(outside), "%s_other/song.mp3", g_root);
     TEST_ASSERT_EQUAL(-1, musiclist_select_path(outside));
     TEST_ASSERT_EQUAL(-1, musiclist_select_path(NULL));
+
+    /* Non-audio files are listed but not selectable as a play target. */
+    musiclist_exit();
+    TEST_ASSERT_EQUAL(0, musiclist_open(g_root));
+    snprintf(missing, sizeof(missing), "%s/readme.txt", g_root);
+    TEST_ASSERT_EQUAL(-1, musiclist_select_path(missing));
 
     musiclist_exit();
     rm_tree();

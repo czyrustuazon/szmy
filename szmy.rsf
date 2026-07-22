@@ -123,7 +123,7 @@ AccessControlInfo:
 
 SystemControlInfo:
   SaveDataSize          : 0K
-  RemasterVersion       : 1
+  RemasterVersion       : 2
   StackSize             : 0x40000
   Dependency:
     ac: 0x0004013000002402

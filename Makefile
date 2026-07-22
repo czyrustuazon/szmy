@@ -79,8 +79,8 @@ APP_AUTHOR := CyT
 
 # CIA / title version (makerom -major/-minor/-micro). RemasterVersion is in szmy.rsf.
 APP_VERSION_MAJOR := 1
-APP_VERSION_MINOR := 0
-APP_VERSION_MICRO := 1
+APP_VERSION_MINOR := 1
+APP_VERSION_MICRO := 0
 
 # Home Menu banner (top screen). Override: BANNER_IMAGE=... BANNER_AUDIO=...
 BANNER_IMAGE ?= banner.png

@@ -280,7 +280,7 @@ int main(int argc, char *argv[])
 
     if (musiclist_init() != 0) {
         consoleSelect(&bottomScreen);
-        printf("Could not open " MUSIC_DIR_FS "\n");
+        printf("Could not open " FS_ROOT_FS "\n");
     }
 
     tap_detector_reset(&lid_taps);
