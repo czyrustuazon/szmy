@@ -86,6 +86,42 @@ static void play_next_track(void)
     }
 }
 
+/* L/R skip needs two presses within this window so a single pocket bump
+ * does not change tracks. Opposite shoulder cancels the pending arm. */
+#define LR_DOUBLE_TAP_MS 500u
+
+static u32      s_lr_armed_key;
+static uint64_t s_lr_armed_ms;
+
+static void lr_double_tap_reset(void)
+{
+    s_lr_armed_key = 0;
+    s_lr_armed_ms  = 0;
+}
+
+/* Returns KEY_L / KEY_R when a confirmed double-tap fires, else 0. */
+static u32 lr_double_tap_feed(u32 kDown, uint64_t now_ms)
+{
+    u32 key;
+
+    if (kDown & KEY_L)
+        key = KEY_L;
+    else if (kDown & KEY_R)
+        key = KEY_R;
+    else
+        return 0;
+
+    if (s_lr_armed_key == key
+        && now_ms - s_lr_armed_ms <= LR_DOUBLE_TAP_MS) {
+        lr_double_tap_reset();
+        return key;
+    }
+
+    s_lr_armed_key = key;
+    s_lr_armed_ms  = now_ms;
+    return 0;
+}
+
 
 /* Up, Up, Down, Down, Left, Right, Left, Right, B, A.
  * Direction presses retain their normal list-navigation behavior. The final
@@ -345,19 +381,23 @@ int main(int argc, char *argv[])
         }
 
         if (botbuttons_confirm_active()) {
+            lr_double_tap_reset();
             if (kDown & KEY_A)
                 botbuttons_confirm_accept();
             if (kDown & KEY_B)
                 botbuttons_confirm_cancel();
         } else if (ftp_is_active()) {
+            lr_double_tap_reset();
             if (kDown & KEY_B) {
                 (void)ftp_toggle();
                 (void)musiclist_refresh();
             }
-        } else if (!ftp_is_active()) {
-            if (kDown & KEY_L)
+        } else {
+            u32 lr = lr_double_tap_feed(kDown, osGetTime());
+
+            if (lr == KEY_L)
                 play_previous_track();
-            else if (kDown & KEY_R)
+            else if (lr == KEY_R)
                 play_next_track();
             if (kDown & (KEY_DUP | KEY_CPAD_UP))
                 musiclist_select_prev();
