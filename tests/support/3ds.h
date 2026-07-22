@@ -47,6 +47,7 @@ void   LightLock_Unlock(LightLock *lock);
 Thread threadCreate(void (*entry)(void *), void *arg, size_t stack_size,
                     int priority, int core_id, bool detached);
 void   threadJoin(Thread thread, u64 timeout_ns);
+void   threadFree(Thread thread);
 
 void   svcSleepThread(u64 nanoseconds);
 

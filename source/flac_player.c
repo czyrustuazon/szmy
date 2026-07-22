@@ -199,6 +199,7 @@ int audio_play_flac(const char *path)
         if (!bufs[i]) {
             ring.stop = true;
             threadJoin(th, U64_MAX);
+            threadFree(th);
             for (int j = 0; j < i; j++)
                 linearFree(bufs[j]);
             linearFree(ring.ring);
@@ -286,6 +287,7 @@ int audio_play_flac(const char *path)
     ring.stop = true;
     pausing = audio_end_is_pause();
     threadJoin(th, U64_MAX);
+    threadFree(th);
     ndspChnWaveBufClear(channel_id);
 
     if (pausing)
