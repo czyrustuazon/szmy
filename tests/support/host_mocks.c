@@ -186,10 +186,13 @@ Thread threadCreate(void (*entry)(void *), void *arg, size_t stack_size,
 void threadJoin(Thread thread, u64 timeout_ns)
 {
     (void)timeout_ns;
-    if (thread) {
+    if (thread)
         pthread_join(*(pthread_t *)thread, NULL);
-        free(thread);
-    }
+}
+
+void threadFree(Thread thread)
+{
+    free(thread);
 }
 
 void svcSleepThread(u64 nanoseconds)

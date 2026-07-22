@@ -35,14 +35,22 @@ static void present_frame(int use_gpu_text, PrintConsole *bottomScreen)
 }
 
 /* Next track from the shuffle bag; a new cycle starts when repeat-all is on
- * and the bag is empty. NULL when the cycle is over (or shuffle failed). */
+ * and the bag is empty. NULL when the cycle is over (or shuffle failed).
+ * If the rebuild still needs more frames, botbuttons_shuffle_poll will start
+ * playback once the bag is ready. */
 static const char *shuffle_next_track(void)
 {
     const char *next = musiclist_shuffle_next();
 
     if (next == NULL && botbuttons_repeat_mode() == 2
-        && musiclist_shuffle_start() > 0)
-        next = musiclist_shuffle_next();
+        && !musiclist_shuffle_building()) {
+        int n = musiclist_shuffle_start();
+
+        if (n > 0)
+            next = musiclist_shuffle_next();
+        else if (n < 0)
+            botbuttons_shuffle_request_next();
+    }
     return next;
 }
 
@@ -272,7 +280,7 @@ int main(int argc, char *argv[])
 
     if (musiclist_init() != 0) {
         consoleSelect(&bottomScreen);
-        printf("Could not open " MUSIC_DIR_FS "\n");
+        printf("Could not open " FS_ROOT_FS "\n");
     }
 
     tap_detector_reset(&lid_taps);
@@ -402,6 +410,8 @@ int main(int argc, char *argv[])
                     (void)musiclist_select_path(next);
             }
         }
+
+        botbuttons_shuffle_poll();
 
         update_keep_awake(&awake_hold);
 

@@ -1,5 +1,6 @@
 #include "audio_ctrl.h"
 #include "audio_ctrl_internal.h"
+#include "error_log.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -191,11 +192,14 @@ int audio_last_play_error(void)
 void audio_set_play_error(int error)
 {
     g_last_play_error = error;
+    if (error != 0)
+        (void)error_log_dump(error);
 }
 
 void audio_clear_play_error(void)
 {
     g_last_play_error = 0;
+    error_log_clear_site();
 }
 
 #ifdef UNIT_TEST

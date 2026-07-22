@@ -61,6 +61,8 @@ static void test_flac_and_mp3_paths(void)
 static void test_cwd_label_root(void)
 {
     char label[64];
+    musiclist_format_cwd_label("sdmc:", label, sizeof(label));
+    TEST_ASSERT_EQUAL_STRING("Root:", label);
     musiclist_format_cwd_label("sdmc:/music", label, sizeof(label));
     TEST_ASSERT_EQUAL_STRING("Root:/music", label);
 }
@@ -70,6 +72,8 @@ static void test_cwd_label_subfolder(void)
     char label[64];
     musiclist_format_cwd_label("sdmc:/music/rock", label, sizeof(label));
     TEST_ASSERT_EQUAL_STRING("Root:/music/rock", label);
+    musiclist_format_cwd_label("sdmc:/3ds", label, sizeof(label));
+    TEST_ASSERT_EQUAL_STRING("Root:/3ds", label);
 }
 
 static void test_cwd_label_foreign_path(void)

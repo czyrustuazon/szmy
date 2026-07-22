@@ -10,6 +10,11 @@ Supports **WAV, FLAC, Opus** (optional), **MP3** (optional), **BRSTM/BCSTM/BFSTM
   Package installs (`pacman` / `dkp-pacman`) only work from that shell — not from PowerShell or cmd.
 - Host toolchain for unit tests / coverage gate: **gcc**, **make**, **lcov**  
   (`pacman -S --needed gcc make lcov` in the same MSYS shell)
+- **Windows:** if host tests die with `Permission denied` (shell exit **126**) on
+  `tests/build/*.exe`, turn **Smart App Control** **Off**  
+  (Windows Security → App & browser control → Smart App Control settings).  
+  Evaluation/On blocks unsigned MSYS-built test binaries; regular Defender stays on.
+
 - Optional audio portlibs (same MSYS shell):
 
   ```bash

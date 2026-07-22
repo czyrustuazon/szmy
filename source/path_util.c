@@ -70,13 +70,14 @@ void musiclist_format_cwd_label(const char *cwd, char *out, size_t out_sz)
         return;
     }
 
-    if (strncmp(cwd, MUSIC_DIR_FS, strlen(MUSIC_DIR_FS)) != 0) {
+    if (strncmp(cwd, FS_ROOT_FS, strlen(FS_ROOT_FS)) != 0) {
         snprintf(out, out_sz, "%s", cwd);
         return;
     }
-    if (strcmp(cwd, MUSIC_DIR_FS) == 0) {
-        snprintf(out, out_sz, "%s", MUSIC_DIR_LABEL);
+    if (strcmp(cwd, FS_ROOT_FS) == 0) {
+        snprintf(out, out_sz, "%s", FS_ROOT_LABEL);
         return;
     }
-    snprintf(out, out_sz, "%s%s", MUSIC_DIR_LABEL, cwd + strlen(MUSIC_DIR_FS));
+    /* sdmc:/music → Root:/music */
+    snprintf(out, out_sz, "%s%s", FS_ROOT_LABEL, cwd + strlen(FS_ROOT_FS));
 }

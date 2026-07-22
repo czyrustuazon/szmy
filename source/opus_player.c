@@ -6,6 +6,7 @@
 #include "audio.h"
 #include "audio_ctrl.h"
 #include "audio_viz.h"
+#include "error_log.h"
 #include "pcm_ring.h"
 
 #if defined(UNIT_TEST)
@@ -188,6 +189,7 @@ int audio_play_opus(const char *path)
     if (!th) {
         linearFree(ring.ring);
         op_free(of);
+        error_log_set_site("opus:decode_thread");
         return -7;
     }
 
@@ -216,6 +218,7 @@ int audio_play_opus(const char *path)
         if (!bufs[i]) {
             ring.stop = true;
             threadJoin(th, U64_MAX);
+            threadFree(th);
             for (int j = 0; j < i; j++)
                 linearFree(bufs[j]);
             linearFree(ring.ring);
@@ -301,6 +304,7 @@ int audio_play_opus(const char *path)
     ring.stop = true;
     pausing = audio_end_is_pause();
     threadJoin(th, U64_MAX);
+    threadFree(th);
     ndspChnWaveBufClear(channel_id);
 
     if (pausing)

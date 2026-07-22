@@ -35,6 +35,7 @@ SRC_PROD := \
 	$(PROJECT_ROOT)/source/id3_util.c \
 	$(PROJECT_ROOT)/source/path_util.c \
 	$(PROJECT_ROOT)/source/audio_errors.c \
+	$(PROJECT_ROOT)/source/error_log.c \
 	$(PROJECT_ROOT)/source/bmp_util.c \
 	$(PROJECT_ROOT)/source/jptext_errors.c \
 	$(PROJECT_ROOT)/source/audio_ctrl.c \
@@ -49,6 +50,7 @@ TEST_RUNNERS := \
 	test_id3_util \
 	test_path_util \
 	test_audio_errors \
+	test_error_log \
 	test_bmp_util \
 	test_jptext_errors \
 	test_audio_ctrl \

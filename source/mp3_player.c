@@ -15,6 +15,7 @@
 #include "audio.h"
 #include "audio_ctrl.h"
 #include "audio_viz.h"
+#include "error_log.h"
 #include "id3_util.h"
 #include "pcm_ring.h"
 
@@ -469,6 +470,7 @@ int audio_play_mp3(const char *path)
     if (!th) {
         linearFree(ring.ring);
         linearFree(file_data);
+        error_log_set_site("mp3:decode_thread");
         return -7;
     }
 
@@ -491,6 +493,7 @@ int audio_play_mp3(const char *path)
         if (!bufs[i]) {
             ring.stop = true;
             threadJoin(th, U64_MAX);
+            threadFree(th);
             for (int j = 0; j < i; j++)
                 linearFree(bufs[j]);
             linearFree(ring.ring);
@@ -574,6 +577,7 @@ int audio_play_mp3(const char *path)
     ring.stop = true;
     pausing = audio_end_is_pause();
     threadJoin(th, U64_MAX);
+    threadFree(th);
     ndspChnWaveBufClear(channel_id);
 
     /* Natural end: snap duration to what actually played so the final

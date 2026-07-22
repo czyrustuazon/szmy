@@ -13,7 +13,7 @@ int path_is_flac(const char *path);
 int path_is_mp3(const char *path);
 int path_is_opus(const char *path);
 
-/* Format sdmc:/music cwd for UI (see musiclist.h constants). */
+/* Format sdmc: cwd for UI (Root:/...). */
 void musiclist_format_cwd_label(const char *cwd, char *out, size_t out_sz);
 
 #endif /* PATH_UTIL_H */
